@@ -1,0 +1,6 @@
+{
+  "name": "SuperManager România - Fantasy Superliga & Live Stats",
+  "description": "Aplicație Fantasy Football pentru Superliga României în stil Kickbase, cu statistici în timp real, formații tactice, piață de transferuri cu licitații, clasament live și predicții de meci.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

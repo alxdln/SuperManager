@@ -1,0 +1,6 @@
+{
+  "summary": "Plan complet de actualizare pentru SuperManager România conform specificațiilor:\n- Modal dedicat de statistică pe etape a managerilor în clasamentul general (grafic + istoric puncte pe etape).\n- Aplicație/dashboard separat pentru Commissioner & Creator accesibil securizat cu PIN.\n- Mutare setări admin ligă în modalul de setări din antet.\n- Reguli noi recompense SuperPredictor (250k / 100k / 50k € fără puncte).\n- Eliminare număr tricou, vârstă, funcție Boost Fan LPF și buton 'Vinde la ligă' din ecranul echipei.\n- Cote inițiale Transfermarkt și actualizare automată în background.",
+  "updatedAt": "2026-10-13T17:05:12.406510306Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
