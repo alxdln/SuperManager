@@ -1,9 +1,20 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Player, MatchHistoryItem } from '../../types/football';
 import { SUPERLIGA_CLUBS } from '../../data/superligaData';
 import { formatCurrency, getPositionBadge, calculatePlayerRating } from '../../utils/scoringEngine';
-import { X, ShieldAlert, Award, TrendingUp, TrendingDown, Flame, Calendar, Clock } from 'lucide-react';
 import { useFantasy } from '../../context/FantasyContext';
+import {
+  X,
+  ChevronLeft,
+  Flame,
+  Award,
+  Calendar,
+  Clock,
+  TrendingUp,
+  TrendingDown,
+  ShieldAlert,
+  Tag,
+} from 'lucide-react';
 
 interface PlayerDetailModalProps {
   player: Player | null;
@@ -11,57 +22,68 @@ interface PlayerDetailModalProps {
   onOpenAuction?: (player: Player) => void;
 }
 
-// Scara vizuală cerută:
-// slab (sub 15p - rosu), ok (sub 30p - portocaliu), bun (sub 50p - galben), foarte bun (peste 50p - verde)
-const getPerformanceBadge = (points: number, minutesPlayed: number) => {
-  if (minutesPlayed === 0 || points === 0) {
-    return {
-      label: 'Rezervă (0p)',
-      textColor: 'text-rose-400',
-      badgeBg: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
-      tagBg: 'bg-rose-950/70 text-rose-300 border-rose-500/40',
-    };
-  }
+/**
+ * Scara vizuală cromatică pentru istoricul punctajelor
+ * slab: sub 15p (roșu)
+ * ok: 15 - 29p (portocaliu)
+ * bun: 30 - 49p (galben)
+ * foarte bun: peste 50p (verde)
+ */
+const getPerformanceColorTier = (points: number) => {
   if (points < 15) {
     return {
-      label: 'Slab',
       textColor: 'text-rose-400',
-      badgeBg: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
-      tagBg: 'bg-rose-950/70 text-rose-300 border-rose-500/40',
+      badgeBg: 'bg-rose-500/15 text-rose-300 border-rose-500/40',
+      dotColor: 'bg-rose-500',
     };
   }
   if (points < 30) {
     return {
-      label: 'OK',
-      textColor: 'text-amber-500',
-      badgeBg: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
-      tagBg: 'bg-amber-950/70 text-amber-300 border-amber-500/40',
+      textColor: 'text-orange-400',
+      badgeBg: 'bg-orange-500/15 text-orange-300 border-orange-500/40',
+      dotColor: 'bg-orange-500',
     };
   }
   if (points < 50) {
     return {
-      label: 'Bun',
-      textColor: 'text-yellow-400',
-      badgeBg: 'bg-yellow-500/10 text-yellow-300 border-yellow-500/30',
-      tagBg: 'bg-yellow-950/70 text-yellow-300 border-yellow-500/40',
+      textColor: 'text-amber-400',
+      badgeBg: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
+      dotColor: 'bg-amber-500',
     };
   }
   return {
-    label: 'Foarte bun',
     textColor: 'text-emerald-400',
-    badgeBg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
-    tagBg: 'bg-emerald-950/70 text-emerald-300 border-emerald-500/40',
+    badgeBg: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
+    dotColor: 'bg-emerald-500',
   };
 };
 
 export const PlayerDetailModal: React.FC<PlayerDetailModalProps> = ({ player, onClose, onOpenAuction }) => {
   const { squad, setCaptain, squadCount, gkCount } = useFantasy();
 
+  // Mobile swipe-back gesture state
+  const [dragX, setDragX] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
+
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+  const isSwipingHorizontalRef = useRef<boolean | null>(null);
+  const modalContainerRef = useRef<HTMLDivElement>(null);
+
+  // Close on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   if (!player) return null;
 
   const club = SUPERLIGA_CLUBS.find((c) => c.id === player.clubId);
   const posBadge = getPositionBadge(player.position);
-  const rating = calculatePlayerRating(player);
 
   const isStarter = Object.values(squad.startingSlots).includes(player.id);
   const isBench = squad.benchPlayerIds.includes(player.id);
@@ -85,259 +107,337 @@ export const PlayerDetailModal: React.FC<PlayerDetailModalProps> = ({ player, on
         { matchday: 1, opponentClubId: 'botosani', result: '1-0', minutesPlayed: 45, points: 12, goals: 0, assists: 0, rating: 6.2, eventsSummary: 'Intrat la pauză, prestație modestă' },
       ].slice(0, 10);
 
-  // Regula cerută: "la puncte etapa sa fie afisata o medie a punctelor din toate meciurile in care a jucat sau a stat pe banca jucatorul in viata reala. daca a fost pe banca nefolosit se vor calcula 0 puncte pentru meciul respectiv si se va calcula la media totala."
+  // Medie puncte pe etapă: fără zecimale, număr rotunjit
   const totalHistoryPoints = allPastMatches.reduce((acc, m) => acc + (m.points || 0), 0);
   const averageMatchdayPoints = allPastMatches.length > 0
-    ? (totalHistoryPoints / allPastMatches.length).toFixed(1)
-    : Number(player.pointsMatchday).toFixed(1);
+    ? Math.round(totalHistoryPoints / allPastMatches.length)
+    : Math.round(Number(player.pointsMatchday));
+
+  // Native Mobile Swipe-to-Back Handlers
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartXRef.current = e.touches[0].clientX;
+    touchStartYRef.current = e.touches[0].clientY;
+    isSwipingHorizontalRef.current = null;
+    setIsDragging(true);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (touchStartXRef.current === null || touchStartYRef.current === null) return;
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const diffX = currentX - touchStartXRef.current;
+    const diffY = currentY - touchStartYRef.current;
+
+    // Detect if movement is predominantly horizontal swipe right
+    if (isSwipingHorizontalRef.current === null) {
+      if (Math.abs(diffX) > 8 || Math.abs(diffY) > 8) {
+        isSwipingHorizontalRef.current = diffX > 0 && Math.abs(diffX) > Math.abs(diffY);
+      }
+    }
+
+    if (isSwipingHorizontalRef.current && diffX > 0) {
+      setDragX(diffX);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (dragX > 75) {
+      // Swiped far enough: trigger mobile pop transition
+      setIsExiting(true);
+      setTimeout(() => {
+        onClose();
+      }, 160);
+    } else {
+      setDragX(0);
+    }
+    setIsDragging(false);
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+    isSwipingHorizontalRef.current = null;
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl text-slate-100 p-5">
-        {/* Close Button */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 z-10 w-9 h-9 flex items-center justify-center rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-300 transition-colors"
-          aria-label="Închide"
-        >
-          <X className="w-5 h-5" />
-        </button>
-
-        {/* Header Info */}
-        <div className="flex items-start gap-4 pb-4 border-b border-slate-800/80">
-          <div className="relative shrink-0">
-            <img
-              src={player.avatar}
-              alt={player.name}
-              className="w-20 h-20 rounded-2xl object-cover border-2 border-slate-700 shadow-md"
-              referrerPolicy="no-referrer"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(player.name)}&background=0f172a&color=05df72&bold=true`;
-              }}
-            />
-          </div>
-
-          <div className="flex-1 min-w-0 pr-6">
-            <div className="flex items-center gap-2">
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${posBadge.bg} ${posBadge.text}`}>
-                {posBadge.label}
-              </span>
-              <span className="text-xs text-slate-400 font-medium truncate">
-                {club?.name || 'Superliga'}
-              </span>
-            </div>
-
-            <h2 className="text-xl font-bold tracking-tight text-white mt-1 truncate">
-              {player.name}
-            </h2>
-
-            <div className="flex items-center gap-2 text-xs text-slate-400 mt-1">
-              <span>{player.nationality}</span>
-              {player.status === 'injured' && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span className="text-rose-400 font-medium flex items-center gap-0.5">
-                    <ShieldAlert className="w-3.5 h-3.5" /> Accidentat
-                  </span>
-                </>
-              )}
-              {player.status === 'suspended' && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span className="text-amber-400 font-medium flex items-center gap-0.5">
-                    <ShieldAlert className="w-3.5 h-3.5" /> Suspendat
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-md transition-opacity duration-200"
+      style={{
+        opacity: isExiting ? 0 : Math.max(0.3, 1 - dragX / 350),
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      {/* Modal / Screen Container with Mobile Swipe Animation */}
+      <div
+        ref={modalContainerRef}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        className="relative w-full h-full sm:h-auto sm:max-w-md sm:max-h-[92vh] bg-slate-900 border-0 sm:border sm:border-slate-800 sm:rounded-3xl shadow-2xl text-slate-100 flex flex-col overflow-hidden will-change-transform"
+        style={{
+          transform: isExiting ? 'translateX(100%)' : `translateX(${dragX}px)`,
+          transition: isDragging ? 'none' : 'transform 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+        }}
+      >
+        {/* Subtle Swipe-back Affordance Indicator on Left Edge */}
+        <div className="absolute left-1 top-1/2 -translate-y-1/2 z-30 pointer-events-none hidden sm:flex flex-col items-center opacity-30 hover:opacity-75 transition-opacity">
+          <div className="w-1 h-12 rounded-full bg-emerald-400/60" />
         </div>
 
-        {/* Injury Warning if any */}
-        {(player.status === 'injured' || player.status === 'suspended') && player.injuryReason && (
-          <div className="mt-3 p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300 flex items-start gap-2">
-            <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-            <span>{player.injuryReason}</span>
-          </div>
-        )}
+        {/* Native Mobile Top Bar Navigation */}
+        <div className="shrink-0 px-4 py-3 border-b border-slate-800 bg-slate-900/95 backdrop-blur-md flex items-center justify-between z-20">
+          <button
+            onClick={onClose}
+            className="flex items-center gap-1 text-xs font-bold text-emerald-400 hover:text-emerald-300 py-1.5 px-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 active:scale-95 transition-all"
+            aria-label="Reveniți la ecranul precedent"
+          >
+            <ChevronLeft className="w-4 h-4 stroke-[2.5]" />
+            <span>Înapoi</span>
+          </button>
 
-        {/* Valuation & Points KPI Strip */}
-        <div className="grid grid-cols-3 gap-2.5 my-4">
-          <div className="p-3 bg-slate-800/60 rounded-2xl border border-slate-800">
-            <span className="text-[11px] text-slate-400 font-medium block">Cotă de Piață</span>
-            <span className="text-base font-bold font-mono text-emerald-400 block mt-0.5">
-              {formatCurrency(player.marketValue)}
-            </span>
-            <div className={`flex items-center gap-1 text-[10px] mt-1 font-mono font-bold ${
-              valueDiff > 0 ? 'text-emerald-400' : valueDiff < 0 ? 'text-rose-400' : 'text-slate-400'
-            }`}>
-              {valueDiff >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-              <span>
-                {valueDiff > 0
-                  ? `+${formatCurrency(valueDiff)}`
-                  : valueDiff < 0
-                  ? `-${formatCurrency(Math.abs(valueDiff))}`
-                  : '€0 (stagnare)'}
-              </span>
-            </div>
-          </div>
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-300 truncate max-w-[170px]">
+            Profil Jucător
+          </span>
 
-          {/* Puncte Etapă: afișează media punctelor din meciurile jucate / rezervă neutilizată (0p) */}
-          <div className="p-3 bg-slate-800/60 rounded-2xl border border-slate-800">
-            <span className="text-[11px] text-slate-400 font-medium block">Puncte Etapă</span>
-            <span className="text-base font-bold font-mono text-amber-400 block mt-0.5">
-              {averageMatchdayPoints} pts
-            </span>
-            <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-1">
-              <Flame className="w-3 h-3 text-amber-400 shrink-0" />
-              <span className="truncate">Medie pe {allPastMatches.length} partide</span>
-            </div>
-          </div>
-
-          <div className="p-3 bg-slate-800/60 rounded-2xl border border-slate-800">
-            <span className="text-[11px] text-slate-400 font-medium block">Puncte Totale</span>
-            <span className="text-base font-bold font-mono text-white block mt-0.5">
-              {player.pointsTotal} pts
-            </span>
-            <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-1">
-              <Award className="w-3 h-3 text-blue-400 shrink-0" />
-              <span>{player.stats.matches || 12} meciuri</span>
-            </div>
-          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 active:scale-95 transition-colors"
+            aria-label="Închide"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
-        {/* Past Matches with Points Breakdown (All Matches History with Visual Scale) */}
-        <div className="mt-4">
-          <div className="flex items-center justify-between mb-1.5">
-            <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-              <Calendar className="w-4 h-4 text-emerald-400" /> Istoric Meciuri &amp; Punctaje
-            </h3>
-            <span className="text-[11px] text-slate-400 font-mono">
-              {allPastMatches.length} partide
-            </span>
-          </div>
-
-          {/* Scală performanță: slab (<15p roșu), ok (<30p portocaliu), bun (<50p galben), foarte bun (≥50p verde) */}
-          <div className="flex items-center gap-2 mb-2 p-1.5 px-2.5 rounded-xl bg-slate-950/70 border border-slate-800 text-[10px] text-slate-400 flex-wrap">
-            <span className="text-slate-300 font-semibold mr-0.5">Scară:</span>
-            <span className="flex items-center gap-1 text-rose-400 font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" /> &lt;15p Slab
-            </span>
-            <span className="flex items-center gap-1 text-amber-400 font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> &lt;30p OK
-            </span>
-            <span className="flex items-center gap-1 text-yellow-300 font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-yellow-400" /> &lt;50p Bun
-            </span>
-            <span className="flex items-center gap-1 text-emerald-400 font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> ≥50p Foarte bun
-            </span>
-          </div>
-
-          <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-            {allPastMatches.map((item, idx) => {
-              const oppClub = SUPERLIGA_CLUBS.find((c) => c.id === item.opponentClubId);
-              const perf = getPerformanceBadge(item.points, item.minutesPlayed);
-
-              return (
-                <div
-                  key={idx}
-                  className="p-3 rounded-2xl bg-slate-800/40 hover:bg-slate-800/70 border border-slate-800/80 transition-colors text-xs space-y-1.5"
+        {/* Scrollable Profile Body */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 overscroll-contain">
+          {/* Showcase Player Avatar (50% din lățimea modalului) & Info Header */}
+          <div className="flex flex-col items-center text-center pb-4 border-b border-slate-800/80 space-y-3">
+            {/* 50% Width Centered Showcase Photo */}
+            <div className="relative w-1/2 max-w-[200px] aspect-square mx-auto">
+              <img
+                src={player.avatar}
+                alt={player.name}
+                className="w-full h-full rounded-3xl object-cover border-4 border-slate-700/90 shadow-2xl bg-slate-950"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(player.name)}&background=0f172a&color=05df72&bold=true`;
+                }}
+              />
+              {isCaptain && (
+                <span
+                  title="Căpitan Activ (x2 puncte)"
+                  className="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center shadow-xl ring-2 ring-amber-200"
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded text-[11px]">
-                        Etapa {item.matchday}
-                      </span>
-                      <span className="font-bold text-white">vs {oppClub?.name || item.opponentClubId}</span>
-                      <span className="text-slate-400 font-mono text-[11px]">({item.result})</span>
-                    </div>
+                  C
+                </span>
+              )}
+            </div>
 
-                    {/* Puncte marcate pe scara vizuală */}
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className={`font-mono font-bold text-xs px-2 py-0.5 rounded-lg border ${perf.badgeBg}`}>
-                        +{item.points} pts
-                      </span>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${perf.tagBg}`}>
-                        {perf.label}
-                      </span>
-                      {item.minutesPlayed > 0 && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/80 text-slate-200 font-mono font-bold">
-                          ★ {item.rating}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-slate-500" />
-                      {item.minutesPlayed > 0 ? `${item.minutesPlayed}' jucate` : '0 min (Pe bancă)'}
-                    </span>
-                    <span className="text-slate-300 font-medium">
-                      {item.eventsSummary || (item.minutesPlayed === 0 ? 'Rezervă neutilizată' : item.goals > 0 ? `${item.goals} gol` : 'Titular integralist')}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Actions Bar */}
-        <div className="mt-6 pt-4 border-t border-slate-800 flex flex-col gap-2.5">
-          {isOwned ? (
-            <>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setCaptain(player.id)}
-                  className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                    isCaptain
-                      ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                      : 'bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700'
-                  }`}
-                >
-                  <Award className="w-4 h-4" />
-                  {isCaptain ? 'Căpitan Activ (x2 la fluierul final)' : 'Setează Căpitan (x2 la final)'}
-                </button>
-
-                {onOpenAuction && (
-                  <button
-                    onClick={() => {
-                      if (squadCount <= 11) {
-                        alert('Lotul tău nu poate scădea sub 11 jucători (minim conform regulamentului)!');
-                        return;
-                      }
-                      if (player.position === 'GK' && gkCount <= 1) {
-                        alert('Nu poți vinde singurul portar din lot! Regulamentul impune cel puțin 1 portar.');
-                        return;
-                      }
-                      onClose();
-                      onOpenAuction(player);
-                    }}
-                    className="py-2.5 px-3 rounded-xl text-xs font-semibold bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-600/40 transition-colors"
-                  >
-                    Pune pe Piață
-                  </button>
-                )}
+            {/* Position, Club, Name & Details */}
+            <div className="w-full flex flex-col items-center">
+              <div className="inline-flex items-center justify-center gap-2 flex-wrap">
+                <span className={`inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-black uppercase tracking-wider border ${posBadge.bg} ${posBadge.text}`}>
+                  {posBadge.label}
+                </span>
+                <span className="inline-flex items-center text-xs text-slate-300 font-bold bg-slate-800/90 px-2.5 py-1 rounded-xl border border-slate-700/80">
+                  {club?.name || 'Superliga'}
+                </span>
               </div>
 
-              {squadCount <= 11 && (
-                <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700 text-slate-400 text-center text-xs">
-                  Vânzare indisponibilă: Lotul tău are {squadCount} jucători (minim 11 obligatoriu conform regulamentului).
-                </div>
-              )}
-              {player.position === 'GK' && gkCount <= 1 && squadCount > 11 && (
-                <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700 text-slate-400 text-center text-xs">
-                  Vânzare indisponibilă: Singurul portar din lot nu poate fi vândut (minim 1 portar cerut).
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="text-center py-2 text-xs text-slate-400 bg-slate-800/30 rounded-xl">
-              Ofertele se plasează direct pe piața de transferuri
+              <h2 className="text-2xl font-black uppercase tracking-tight text-white mt-2 truncate w-full">
+                {player.name}
+              </h2>
+
+              <div className="inline-flex items-center justify-center gap-2 text-xs text-slate-400 mt-1 flex-wrap">
+                <span className="font-medium">{player.nationality}</span>
+                {player.status === 'injured' && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="text-rose-400 font-bold inline-flex items-center gap-1">
+                      <ShieldAlert className="w-3.5 h-3.5 shrink-0 inline-block" /> Accidentat
+                    </span>
+                  </>
+                )}
+                {player.status === 'suspended' && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="text-amber-400 font-bold inline-flex items-center gap-1">
+                      <ShieldAlert className="w-3.5 h-3.5 shrink-0 inline-block" /> Suspendat
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Injury Warning if any */}
+          {(player.status === 'injured' || player.status === 'suspended') && player.injuryReason && (
+            <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300 flex items-start gap-2">
+              <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <span>{player.injuryReason}</span>
             </div>
           )}
+
+          {/* Valuation & Points KPI Strip */}
+          <div className="grid grid-cols-3 gap-2.5">
+            {/* Cotă de piață cu evoluția în sumă fixă */}
+            <div className="p-3 bg-slate-800/60 rounded-2xl border border-slate-800">
+              <span className="text-[11px] text-slate-400 font-medium block">Cotă de Piață</span>
+              <span className="text-base font-bold font-mono text-emerald-400 block mt-0.5">
+                {formatCurrency(player.marketValue)}
+              </span>
+              <div className={`flex items-center gap-1 text-[10px] mt-1 font-mono font-bold ${
+                valueDiff > 0 ? 'text-emerald-400' : valueDiff < 0 ? 'text-rose-400' : 'text-slate-400'
+              }`}>
+                {valueDiff >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                <span className="truncate">
+                  {valueDiff > 0
+                    ? `+${formatCurrency(valueDiff)}`
+                    : valueDiff < 0
+                    ? `-${formatCurrency(Math.abs(valueDiff))}`
+                    : '€0'}
+                </span>
+              </div>
+            </div>
+
+            {/* Medie Puncte pe Etapă: fără zecimale, număr rotunjit */}
+            <div className="p-3 bg-slate-800/60 rounded-2xl border border-slate-800">
+              <span className="text-[11px] text-slate-400 font-medium block leading-tight">Medie Pct. Etapă</span>
+              <span className="text-base font-bold font-mono text-amber-400 block mt-0.5">
+                {averageMatchdayPoints} pts
+              </span>
+              <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-1">
+                <Flame className="w-3 h-3 text-amber-400 shrink-0" />
+                <span className="truncate">{allPastMatches.length} meciuri</span>
+              </div>
+            </div>
+
+            {/* Puncte Totale */}
+            <div className="p-3 bg-slate-800/60 rounded-2xl border border-slate-800">
+              <span className="text-[11px] text-slate-400 font-medium block">Puncte Totale</span>
+              <span className="text-base font-bold font-mono text-white block mt-0.5">
+                {player.pointsTotal} pts
+              </span>
+              <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-1">
+                <Award className="w-3 h-3 text-blue-400 shrink-0" />
+                <span>{player.stats.matches || 12} partide</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Past Matches History with Pure Chromatic Scale (No text labels, no explicit legend) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <Calendar className="w-4 h-4 text-emerald-400" /> Istoric Meciuri &amp; Punctaje
+              </h3>
+              <span className="text-[11px] text-slate-400 font-mono">
+                Ultimele {allPastMatches.length} etape
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              {allPastMatches.map((item, idx) => {
+                const oppClub = SUPERLIGA_CLUBS.find((c) => c.id === item.opponentClubId);
+                const perf = getPerformanceColorTier(item.points);
+
+                return (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-2xl bg-slate-800/50 border border-slate-700/60 flex flex-col gap-1.5"
+                  >
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                          Etapa {item.matchday}
+                        </span>
+                        <span className="font-bold text-white">vs {oppClub?.name || item.opponentClubId}</span>
+                        <span className="text-slate-400 font-mono text-[11px]">({item.result})</span>
+                      </div>
+
+                      {/* Scara cromatică pură pentru puncte */}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className={`font-mono font-bold text-xs px-2.5 py-0.5 rounded-lg border ${perf.badgeBg}`}>
+                          +{item.points} pts
+                        </span>
+                        {item.minutesPlayed > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/80 text-slate-200 font-mono font-bold">
+                            ★ {item.rating}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-slate-500" />
+                        {item.minutesPlayed > 0 ? `${item.minutesPlayed}' jucate` : '0 min (Pe bancă)'}
+                      </span>
+                      <span className="text-slate-300 font-medium">
+                        {item.eventsSummary || (item.minutesPlayed === 0 ? 'Rezervă neutilizată' : item.goals > 0 ? `${item.goals} gol` : 'Titular integralist')}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Actions Bar */}
+          <div className="pt-2 border-t border-slate-800 flex flex-col gap-2.5">
+            {isOwned ? (
+              <>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setCaptain(player.id)}
+                    className={`flex-1 py-3 px-3 rounded-2xl text-xs font-extrabold uppercase tracking-wider transition-all inline-flex items-center justify-center gap-2 text-center leading-tight shadow-md break-words ${
+                      isCaptain
+                        ? 'bg-amber-500 text-slate-950 shadow-amber-500/20'
+                        : 'bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700'
+                    }`}
+                  >
+                    <Award className="w-4 h-4 shrink-0 inline-block" />
+                    <span className="inline-block">{isCaptain ? 'CĂPITAN ACTIV' : 'SETEAZĂ CĂPITAN'}</span>
+                  </button>
+
+                  {onOpenAuction && (
+                    <button
+                      onClick={() => {
+                        if (squadCount <= 11) {
+                          alert('Lotul tău nu poate scădea sub 11 jucători (minim conform regulamentului)!');
+                          return;
+                        }
+                        if (player.position === 'GK' && gkCount <= 1) {
+                          alert('Nu poți vinde singurul portar din lot! Regulamentul impune cel puțin 1 portar.');
+                          return;
+                        }
+                        onClose();
+                        onOpenAuction(player);
+                      }}
+                      className="py-3 px-3.5 rounded-2xl text-xs font-extrabold uppercase tracking-wider bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 border border-indigo-400/40 transition-all inline-flex items-center justify-center gap-2 text-center leading-tight shrink-0"
+                    >
+                      <Tag className="w-4 h-4 shrink-0 inline-block" />
+                      <span className="inline-block">PUNE PE PIAȚĂ</span>
+                    </button>
+                  )}
+                </div>
+
+                {squadCount <= 11 && (
+                  <div className="p-2 rounded-xl bg-slate-800/60 border border-slate-700 text-slate-400 text-center text-xs">
+                    Vânzare indisponibilă: Lotul are minim 11 jucători.
+                  </div>
+                )}
+                {player.position === 'GK' && gkCount <= 1 && squadCount > 11 && (
+                  <div className="p-2 rounded-xl bg-slate-800/60 border border-slate-700 text-slate-400 text-center text-xs">
+                    Vânzare indisponibilă: Singurul portar din lot nu poate fi vândut.
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-center py-2 text-xs text-slate-400 bg-slate-800/30 rounded-xl">
+                Ofertele se plasează direct pe piața de transferuri
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

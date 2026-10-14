@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // Custom players for testing and squad additions
+    match /custom_players/{playerId} {
+      allow read, write: if true;
+    }
+
+    // App state, persistent settings and squad test data
+    match /app_settings/{docId} {
+      allow read, write: if true;
+    }
+
+    match /saved_squads/{squadId} {
+      allow read, write: if true;
+    }
+  }
+}

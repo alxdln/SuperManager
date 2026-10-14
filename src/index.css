@@ -3,16 +3,16 @@
 @theme {
   --font-sans: 'Ubuntu', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
-  --color-pitch-bg: #070b12;
-  --color-pitch-card: #0f172a;
-  --color-pitch-surface: #1e293b;
+  --color-pitch-bg: #161920;
+  --color-pitch-card: #212631;
+  --color-pitch-surface: #282e3c;
   --color-turf: #10b981;
   --color-turf-neon: #05df72;
   --color-gold: #f59e0b;
 }
 
 body {
-  background-color: #070b12;
+  background-color: #161920;
   color: #f8fafc;
   font-family: var(--font-sans);
   overflow-x: hidden;

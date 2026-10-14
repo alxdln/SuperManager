@@ -15,19 +15,11 @@ interface PlayerSelectionDrawerProps {
   onRemovePlayer: () => void;
 }
 
-// Convertire strictă în doar 4 poziții fundamentale: P, D, M, A (fără MDC, MC, AS etc.)
-const shortPosMap: Record<PlayerPosition, 'P' | 'D' | 'M' | 'A'> = {
-  GK: 'P',
-  DEF: 'D',
-  MID: 'M',
-  FWD: 'A',
-};
-
 const fullPosLabel: Record<PlayerPosition, string> = {
-  GK: 'Portar (P)',
-  DEF: 'Fundaș (D)',
-  MID: 'Mijlocaș (M)',
-  FWD: 'Atacant (A)',
+  GK: 'Portar',
+  DEF: 'Fundaș',
+  MID: 'Mijlocaș',
+  FWD: 'Atacant',
 };
 
 export const PlayerSelectionDrawer: React.FC<PlayerSelectionDrawerProps> = ({
@@ -39,7 +31,7 @@ export const PlayerSelectionDrawer: React.FC<PlayerSelectionDrawerProps> = ({
 }) => {
   const { players, squad } = useFantasy();
 
-  const posLetter = shortPosMap[requiredPosition];
+  const posFullName = fullPosLabel[requiredPosition];
 
   // Find all players in user's squad (starting XI + bench)
   const starters = Object.values(squad.startingSlots).filter(Boolean) as string[];
@@ -81,10 +73,10 @@ export const PlayerSelectionDrawer: React.FC<PlayerSelectionDrawerProps> = ({
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800">
           <div>
             <h3 className="text-base font-bold text-white flex items-center gap-2">
-              Alege Titular: <span className="text-emerald-400 font-mono text-lg font-black bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-lg">{posLetter}</span>
+              Alege Titular: <span className="text-emerald-400 font-mono text-base font-black bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-lg uppercase">{posFullName}</span>
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Poziție obligatorie: <span className="font-bold text-emerald-400">{fullPosLabel[requiredPosition]}</span>
+              Poziție obligatorie: <span className="font-bold text-emerald-400">{posFullName}</span>
               <span className="text-slate-500 ml-1.5">(Prioritizare: Rezerve bancă → Medie puncte → Total)</span>
             </p>
           </div>
@@ -111,7 +103,7 @@ export const PlayerSelectionDrawer: React.FC<PlayerSelectionDrawerProps> = ({
           )}
 
           <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pt-1 flex items-center justify-between">
-            <span>Jucători eligibili în lot (Post: {posLetter})</span>
+            <span>Jucători eligibili în lot (Post: {posFullName})</span>
             <span className="text-slate-500 text-[10px]">{matchingPlayers.length} disponibili</span>
           </div>
 
@@ -119,10 +111,10 @@ export const PlayerSelectionDrawer: React.FC<PlayerSelectionDrawerProps> = ({
             <div className="p-6 rounded-2xl bg-slate-800/30 border border-dashed border-slate-700 text-center space-y-2">
               <AlertTriangle className="w-6 h-6 text-amber-400 mx-auto" />
               <p className="text-xs text-slate-300 font-semibold">
-                Nu ai niciun jucător pe poziția de {posLetter} în lot!
+                Nu ai niciun jucător pe poziția de {posFullName} în lot!
               </p>
               <p className="text-[11px] text-slate-400">
-                Fiecare post neocupat la startul etapei atrage o penalizare de <b>-100 puncte</b>. Accesează piața de transferuri pentru a cumpăra un jucător de poziție {posLetter}.
+                Fiecare post neocupat la startul etapei atrage o penalizare de <b>-100 puncte</b>. Accesează piața de transferuri pentru a cumpăra un jucător de poziție {posFullName}.
               </p>
             </div>
           ) : (
@@ -161,12 +153,12 @@ export const PlayerSelectionDrawer: React.FC<PlayerSelectionDrawerProps> = ({
                     />
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border font-mono ${badge.bg} ${badge.text}`}>
-                          {posLetter}
+                        <span className={`inline-flex items-center text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg border ${badge.bg} ${badge.text}`}>
+                          {badge.label}
                         </span>
-                        <span className="text-xs font-bold text-white truncate">{player.name}</span>
+                        <span className="text-xs font-black uppercase tracking-tight text-white truncate">{player.name}</span>
                         {isBench && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                          <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
                             Bancă
                           </span>
                         )}

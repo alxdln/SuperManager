@@ -39,6 +39,10 @@ export const TransferMarketView: React.FC = () => {
     transactions,
     squadCount,
     gkCount,
+    squadTotalValue,
+    minAllowedBalance,
+    maxOverdraftLimit,
+    isBudgetNegative,
   } = useFantasy();
 
   // Top Tabs: Cumpără vs Vinde
@@ -59,6 +63,19 @@ export const TransferMarketView: React.FC = () => {
   const [sellingPlayerId, setSellingPlayerId] = useState<string>('');
   const [minAskingPrice, setMinAskingPrice] = useState<number>(1000000);
   const [actionMessage, setActionMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Overdraft Warning Confirmation Modal State
+  const [overdraftPrompt, setOverdraftPrompt] = useState<{
+    itemId: string;
+    playerName: string;
+    offerAmount: number;
+    currentBudget: number;
+    resultingBudget: number;
+    maxLimit: number;
+  } | null>(null);
+
+  // Overdraft Limit Block Modal State
+  const [overdraftBlockMessage, setOverdraftBlockMessage] = useState<string | null>(null);
 
   // User's players
   const starters = Object.values(squad.startingSlots).filter(Boolean) as string[];
@@ -118,7 +135,7 @@ export const TransferMarketView: React.FC = () => {
     return `${totalHours}h rămase`;
   };
 
-  const handleBidSubmit = (itemId: string) => {
+  const handleBidSubmit = (itemId: string, skipOverdraftConfirm = false) => {
     const item = unifiedMarketItems.find((i) => i.id === itemId);
     if (!item) return;
 
@@ -131,6 +148,30 @@ export const TransferMarketView: React.FC = () => {
     }
 
     const offerAmount = customBidInputs[itemId] || item.currentBid + 50000;
+    const player = players.find((p) => p.id === item.playerId);
+    const resultingBudget = user.budget - offerAmount;
+
+    // 1. Check max 50% overdraft limit:
+    if (resultingBudget < minAllowedBalance) {
+      setOverdraftBlockMessage(
+        `Nu poți plasa această ofertă de ${formatCurrency(offerAmount)}!\n\nValoarea lotului tău este de ${formatCurrency(squadTotalValue)}, ceea ce îți permite un sold negativ de maximum 50% (${formatCurrency(minAllowedBalance)}).\n\nCu această ofertă, soldul tău ar ajunge la ${formatCurrency(resultingBudget)}.\n\nVinde fotbaliști din lot pentru a-ți spori bugetul!`
+      );
+      return;
+    }
+
+    // 2. If entering negative balance (or already negative) and not confirmed yet:
+    if (resultingBudget < 0 && !skipOverdraftConfirm) {
+      setOverdraftPrompt({
+        itemId,
+        playerName: player?.name || 'Jucător',
+        offerAmount,
+        currentBudget: user.budget,
+        resultingBudget,
+        maxLimit: minAllowedBalance,
+      });
+      return;
+    }
+
     const res = placeMarketOffer(itemId, offerAmount);
 
     if (res.success) {
@@ -364,19 +405,27 @@ export const TransferMarketView: React.FC = () => {
               })}
             </div>
 
-            {/* Position Pills */}
+            {/* Position Pills with Full Names */}
             <div className="flex items-center gap-1.5 overflow-x-auto pt-1 border-t border-slate-800">
-              {(['ALL', 'GK', 'DEF', 'MID', 'FWD'] as const).map((pos) => (
+              {(
+                [
+                  { key: 'ALL', label: 'TOATE POSTURILE' },
+                  { key: 'GK', label: 'PORTARI' },
+                  { key: 'DEF', label: 'FUNDAȘI' },
+                  { key: 'MID', label: 'MIJLOCAȘI' },
+                  { key: 'FWD', label: 'ATACANȚI' },
+                ] as const
+              ).map(({ key, label }) => (
                 <button
-                  key={pos}
-                  onClick={() => setSelectedPosition(pos)}
-                  className={`py-1 px-2.5 rounded-lg text-[11px] font-mono font-bold transition-all ${
-                    selectedPosition === pos
+                  key={key}
+                  onClick={() => setSelectedPosition(key as PlayerPosition | 'ALL')}
+                  className={`py-1.5 px-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
+                    selectedPosition === key
                       ? 'bg-emerald-500 text-slate-950 shadow-sm'
-                      : 'bg-slate-800 text-slate-400 hover:text-white'
+                      : 'bg-slate-800 text-slate-300 hover:text-white'
                   }`}
                 >
-                  {pos === 'ALL' ? 'Toate Posturile' : pos}
+                  {label}
                 </button>
               ))}
 
@@ -449,44 +498,42 @@ export const TransferMarketView: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Player Info Strip */}
+                    {/* Player Preview Showcase (Poza 50% din lățime) */}
                     <div
                       onClick={() => setSelectedPlayerForDetail(player)}
-                      className="flex items-center gap-3.5 cursor-pointer group"
+                      className="flex flex-col items-center text-center p-3 rounded-2xl bg-slate-950/40 border border-slate-800/80 cursor-pointer group hover:border-emerald-500/40 transition-all space-y-2.5"
                     >
-                      <img
-                        src={player.avatar}
-                        alt={player.name}
-                        className="w-13 h-13 rounded-2xl object-cover border-2 border-slate-700 shadow-md bg-slate-950 group-hover:scale-105 transition-transform shrink-0"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(player.name)}&background=0f172a&color=05df72&bold=true`;
-                        }}
-                      />
+                      {/* 50% Width Photo */}
+                      <div className="w-1/2 max-w-[170px] aspect-square rounded-2xl overflow-hidden border-2 border-slate-700 shadow-md bg-slate-950 group-hover:scale-105 transition-transform shrink-0 relative">
+                        <img
+                          src={player.avatar}
+                          alt={player.name}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(player.name)}&background=0f172a&color=05df72&bold=true`;
+                          }}
+                        />
+                        <span className={`absolute bottom-1.5 left-1/2 -translate-x-1/2 inline-flex items-center px-2 py-0.5 rounded-md font-black uppercase tracking-wider text-[10px] shadow border ${badge.bg} ${badge.text}`}>
+                          {badge.label}
+                        </span>
+                      </div>
 
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${badge.bg} ${badge.text}`}>
-                            {badge.label}
-                          </span>
-                          <span className="text-xs text-slate-400 truncate">{club?.name}</span>
-                        </div>
-
-                        <h4 className="text-base font-bold text-white mt-0.5 truncate group-hover:text-emerald-400 transition-colors">
+                      {/* Details */}
+                      <div className="w-full">
+                        <h4 className="text-base font-extrabold uppercase tracking-tight text-white group-hover:text-emerald-400 transition-colors">
                           {player.name}
                         </h4>
+                        <span className="text-xs text-slate-400 font-medium block mt-0.5">{club?.name}</span>
 
-                        <div className="flex items-center gap-2 mt-0.5 text-xs">
-                          <span className="font-mono text-emerald-400 font-semibold">
+                        <div className="flex items-center justify-center gap-2 mt-1.5 text-xs font-mono flex-wrap">
+                          <span className="text-emerald-400 font-bold bg-emerald-500/10 px-2.5 py-0.5 rounded-lg border border-emerald-500/20">
                             Cotă: {formatCurrency(player.marketValue)}
                           </span>
-                          <span className="text-slate-500">·</span>
-                          <span className="font-mono text-amber-400 font-semibold">
+                          <span className="text-amber-400 font-bold bg-amber-500/10 px-2.5 py-0.5 rounded-lg border border-amber-500/20">
                             {player.pointsTotal} pts sezon
                           </span>
                         </div>
                       </div>
-
-                      <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-300 transition-colors shrink-0" />
                     </div>
 
                     {/* Two KPI Blocks: Oferta Curentă & Clauză Transfer Instant (€) */}
@@ -564,38 +611,78 @@ export const TransferMarketView: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Custom Bid Input & Offer Action (Comenzi rapide eliminate) */}
+                    {/* Custom Bid Input & Offer Action: Formatted with dots & FĂ O OFERTĂ */}
                     {!isSellerMe ? (
-                      <div className="pt-0.5">
-                        <div className="flex items-center gap-2">
+                      <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                           <div className="relative flex-1">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs font-bold">
                               €
                             </span>
                             <input
-                              type="number"
-                              step="50000"
-                              min={item.currentBid + 10000}
-                              value={currentBidVal}
-                              onChange={(e) =>
+                              type="text"
+                              inputMode="numeric"
+                              value={currentBidVal ? currentBidVal.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.') : ''}
+                              onChange={(e) => {
+                                const digitsOnly = e.target.value.replace(/\D/g, '');
                                 setCustomBidInputs((prev) => ({
                                   ...prev,
-                                  [item.id]: Number(e.target.value),
-                                }))
-                              }
+                                  [item.id]: digitsOnly ? parseInt(digitsOnly, 10) : 0,
+                                }));
+                              }}
                               placeholder="Introdu suma dorită..."
-                              className="w-full pl-7 pr-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs font-mono font-bold text-white focus:outline-none focus:border-emerald-500"
+                              className="w-full pl-8 pr-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm font-mono font-bold text-white focus:outline-none focus:border-emerald-500 tracking-wide"
                             />
                           </div>
 
-                          <button
-                            onClick={() => handleBidSubmit(item.id)}
-                            className="py-2 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center gap-1.5 shrink-0 active:scale-95"
-                          >
-                            <UserCheck className="w-3.5 h-3.5" />
-                            <span>Oferă Suma</span>
-                          </button>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCustomBidInputs((prev) => ({
+                                  ...prev,
+                                  [item.id]: Math.max(item.currentBid + 10000, (currentBidVal || item.currentBid) - 50000),
+                                }));
+                              }}
+                              className="py-2 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono font-bold text-xs border border-slate-700 active:scale-95 transition-all"
+                              title="Scade 50.000€"
+                            >
+                              -50k
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCustomBidInputs((prev) => ({
+                                  ...prev,
+                                  [item.id]: (currentBidVal || item.currentBid) + 50000,
+                                }));
+                              }}
+                              className="py-2 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono font-bold text-xs border border-slate-700 active:scale-95 transition-all"
+                              title="Adaugă 50.000€"
+                            >
+                              +50k
+                            </button>
+
+                            <button
+                              onClick={() => handleBidSubmit(item.id)}
+                              className="py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold uppercase tracking-wider text-xs shadow-md shadow-emerald-500/20 transition-all inline-flex items-center justify-center gap-1.5 shrink-0 active:scale-95 text-center leading-tight min-w-[130px]"
+                            >
+                              <UserCheck className="w-4 h-4 shrink-0 inline-block" />
+                              <span className="inline-block">FĂ O OFERTĂ</span>
+                            </button>
+                          </div>
                         </div>
+
+                        {currentBidVal > 0 && (
+                          <div className="flex items-center justify-between text-[11px] font-mono px-1">
+                            <span className="text-slate-400">
+                              Valoare introdusă: <b className="text-emerald-400">{currentBidVal.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')} €</b>
+                            </span>
+                            <span className="text-slate-500">
+                              Minim acceptat: {(item.currentBid + 10000).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')} €
+                            </span>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="flex items-center justify-between p-2.5 bg-indigo-950/40 rounded-xl border border-indigo-900/60 text-xs text-indigo-300">
@@ -1029,6 +1116,118 @@ export const TransferMarketView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Overdraft Warning Confirmation Pop-up */}
+      {overdraftPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-slate-900 border-2 border-amber-500/50 rounded-3xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-400 shrink-0">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black uppercase tracking-tight text-white">
+                  Avertisment: Vei intra pe minus!
+                </h3>
+                <span className="text-xs text-amber-300 font-bold">
+                  Fonduri insuficiente în bugetul direct
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2 text-xs">
+              <div className="flex items-center justify-between text-slate-300">
+                <span>Jucător vizat:</span>
+                <b className="text-white uppercase font-bold">{overdraftPrompt.playerName}</b>
+              </div>
+              <div className="flex items-center justify-between text-slate-300">
+                <span>Sumă ofertată:</span>
+                <b className="text-emerald-400 font-mono font-bold">{formatCurrency(overdraftPrompt.offerAmount)}</b>
+              </div>
+              <div className="flex items-center justify-between text-slate-300">
+                <span>Bugetul tău curent:</span>
+                <b className="text-slate-200 font-mono">{formatCurrency(overdraftPrompt.currentBudget)}</b>
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-slate-300">
+                <span>Sold rezultat (pe minus):</span>
+                <b className="text-rose-400 font-mono font-black text-sm">{formatCurrency(overdraftPrompt.resultingBudget)}</b>
+              </div>
+              <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                <span>Limită maximă permisă (-50% din lot):</span>
+                <span className="font-mono text-amber-300">{formatCurrency(overdraftPrompt.maxLimit)}</span>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 space-y-1.5 leading-relaxed">
+              <div className="flex items-center gap-1.5 font-black uppercase text-[11px] text-amber-300">
+                <span>⚠️ Regulă Oficială SuperManager</span>
+              </div>
+              <p>
+                Poți intra în minus până la maximum 50% din valoarea lotului tău ({formatCurrency(overdraftPrompt.maxLimit)}).
+              </p>
+              <p className="font-bold text-white">
+                Trebuie să fii pe plus înainte să înceapă etapa în realitate, când se salvează echipa pentru LIVE! Dacă te prinde începutul etapei în minus, NU primești puncte în clasament în etapa respectivă.
+              </p>
+            </div>
+
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setOverdraftPrompt(null)}
+                className="flex-1 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-extrabold uppercase text-xs transition-colors"
+              >
+                Renunță
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const targetItemId = overdraftPrompt.itemId;
+                  setOverdraftPrompt(null);
+                  handleBidSubmit(targetItemId, true);
+                }}
+                className="flex-1 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black uppercase tracking-wider text-xs shadow-lg shadow-amber-500/20 active:scale-95 transition-all text-center"
+              >
+                Confirmă pe Minus
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Overdraft Block Modal (Exceeded 50% Squad Value Limit) */}
+      {overdraftBlockMessage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-slate-900 border-2 border-rose-500/60 rounded-3xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-rose-500/20 text-rose-400 shrink-0">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black uppercase tracking-tight text-white">
+                  Limită Overdraft Depășită
+                </h3>
+                <span className="text-xs text-rose-300 font-bold">
+                  Maxim 50% din valoarea lotului permis în minus
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 text-xs text-slate-300 whitespace-pre-line leading-relaxed">
+              {overdraftBlockMessage}
+            </div>
+
+            <button
+              onClick={() => {
+                setOverdraftBlockMessage(null);
+                setActiveMainTab('sell');
+              }}
+              className="w-full py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black uppercase tracking-wider text-xs shadow-lg shadow-rose-600/30 transition-all active:scale-95 text-center"
+            >
+              Închide și Vinde Jucători
+            </button>
           </div>
         </div>
       )}

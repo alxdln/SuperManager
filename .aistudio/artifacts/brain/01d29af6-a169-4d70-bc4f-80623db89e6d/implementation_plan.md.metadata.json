@@ -1,6 +1,6 @@
 {
-  "summary": "Plan complet de actualizare pentru SuperManager România conform specificațiilor:\n- Modal dedicat de statistică pe etape a managerilor în clasamentul general (grafic + istoric puncte pe etape).\n- Aplicație/dashboard separat pentru Commissioner & Creator accesibil securizat cu PIN.\n- Mutare setări admin ligă în modalul de setări din antet.\n- Reguli noi recompense SuperPredictor (250k / 100k / 50k € fără puncte).\n- Eliminare număr tricou, vârstă, funcție Boost Fan LPF și buton 'Vinde la ligă' din ecranul echipei.\n- Cote inițiale Transfermarkt și actualizare automată în background.",
-  "updatedAt": "2026-10-13T17:05:12.406510306Z",
+  "summary": "Plan de implementare pentru:\n1. Eliminare overflow:hidden și aplicare flex-wrap cu centrare verticală și orizontală.\n2. Poze jucători la 50% din lățime în cardurile preview din Echipă și Transferuri.\n3. Redenumire tab-uri footer: 'Piață' -> 'Transferuri' și 'Predictor' -> 'Predicții'.\n4. Sistem Overdraft buget (maxim -50% din valoarea lotului), pop-up warning la fonduri insuficiente, și regulă penalizare LIVE (jucătorii afișează punctele normal, dar punctajul general al echipei devine 0).\n5. Mod 'Meci Demo' de 3 minute în tab-ul LIVE cu cronometru accelerat, jucători din lotul propriu, evenimente realiste și buton dedicat de restart.\n6. Arhitectură Cloud Firestore pentru persistență jucători noi și analiză detaliată a opțiunilor API (Sofascore, Flashscore, OPTA, API-Football) pentru date live din Superliga.",
+  "updatedAt": "2026-10-14T12:37:10.921953529Z",
   "requestFeedback": true,
   "userFacing": true
 }

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Player, Fixture, MatchLiveEvent, PlayerPosition } from '../../types/football';
 import { SUPERLIGA_CLUBS } from '../../data/superligaData';
-import { formatCurrency } from '../../utils/scoringEngine';
-import { X, Activity, Flame, Shield, Award, AlertCircle, Clock, CheckCircle2, ChevronRight } from 'lucide-react';
+import { formatCurrency, LIVE_SCORING_CATEGORIES } from '../../utils/scoringEngine';
+import { X, Activity, Flame, Shield, Award, AlertCircle, Clock, CheckCircle2, ChevronRight, BookOpen } from 'lucide-react';
 
 interface PlayerLiveStreamModalProps {
   player: Player;
@@ -12,11 +12,11 @@ interface PlayerLiveStreamModalProps {
   onClose: () => void;
 }
 
-const shortPosMap: Record<PlayerPosition, 'P' | 'D' | 'M' | 'A'> = {
-  GK: 'P',
-  DEF: 'D',
-  MID: 'M',
-  FWD: 'A',
+const fullPosMap: Record<PlayerPosition, string> = {
+  GK: 'PORTAR',
+  DEF: 'FUNDAȘ',
+  MID: 'MIJLOCAȘ',
+  FWD: 'ATACANT',
 };
 
 const posColorMap: Record<PlayerPosition, { bg: string; text: string }> = {
@@ -33,13 +33,14 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
   isStarter,
   onClose,
 }) => {
-  const [activeTab, setActiveTab] = useState<'player' | 'match'>('player');
+  const [activeTab, setActiveTab] = useState<'player' | 'match' | 'rules'>('player');
+  const [selectedRuleCategory, setSelectedRuleCategory] = useState<string>('Pase & Atac');
 
   const homeClub = SUPERLIGA_CLUBS.find((c) => c.id === fixture?.homeClubId);
   const awayClub = SUPERLIGA_CLUBS.find((c) => c.id === fixture?.awayClubId);
   const playerClub = SUPERLIGA_CLUBS.find((c) => c.id === player.clubId);
 
-  const posLetter = shortPosMap[player.position];
+  const posFullName = fullPosMap[player.position];
   const posStyle = posColorMap[player.position];
 
   // Events involving this specific player
@@ -52,30 +53,60 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
 
   const getEventIcon = (type: MatchLiveEvent['type']) => {
     switch (type) {
-      case 'goal':
-        return '⚽';
-      case 'assist':
-        return '🎯';
-      case 'shot_on_target':
-        return '🔥';
-      case 'shot_missed':
-        return '💨';
-      case 'tackle':
-        return '🛡️';
-      case 'recovery':
-        return '🧱';
-      case 'key_pass':
-        return '✨';
-      case 'yellow_card':
-        return '🟨';
-      case 'red_card':
-        return '🟥';
+      // Pase & Atac
+      case 'goal': return '⚽';
+      case 'assist': return '🎯';
+      case 'shot_on_target': return '🔥';
+      case 'shot_missed': return '💨';
+      case 'key_pass': return '✨';
+      case 'pass_forward': return '↗️';
+      case 'long_pass': return '📡';
+      case 'cross_successful': return '💫';
+      case 'dribble_success': return '🕺';
+      case 'dispossessed': return '⚠️';
+      case 'pass_error': return '❌';
+      case 'big_chance_missed': return '😱';
+      case 'penalty_won': return '🌟';
+      case 'penalty_missed': return '🤦';
+
+      // Dueluri & Apărare
+      case 'tackle': return '🛡️';
+      case 'clearance': return '🥊';
+      case 'interception':
+      case 'recovery': return '🧱';
+      case 'shot_blocked': return '🛑';
+      case 'duel_won': return '💪';
+      case 'duel_lost': return '📉';
+      case 'aerial_won': return '🦘';
+      case 'aerial_lost': return '⬇️';
+      case 'goal_line_clearance': return '🏰';
+      case 'dribbled_past': return '🔄';
+      case 'error_lead_to_goal': return '💥';
+
+      // Disciplină
+      case 'foul': return '🚷';
+      case 'foul_drawn': return '🤕';
+      case 'penalty_conceded': return '⛔';
+      case 'yellow_card': return '🟨';
+      case 'red_card': return '🟥';
+
+      // Portar
       case 'save':
-        return '🧤';
-      case 'clean_sheet_bonus':
-        return '🏰';
-      default:
-        return '⚡';
+      case 'save_in_box': return '🧤';
+      case 'punch': return '👊';
+      case 'keeper_sweeper': return '🏃';
+      case 'high_claim': return '👐';
+      case 'clean_sheet_bonus': return '🏰';
+
+      // Meci
+      case 'match_won': return '🏆';
+      case 'match_draw': return '🤝';
+      case 'match_lost': return '💔';
+      case 'starter_bonus': return '⭐';
+      case 'substitute_in_bonus': return '🔄';
+      case 'minutes_bonus': return '⏱️';
+
+      default: return '⚡';
     }
   };
 
@@ -122,11 +153,11 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
               </div>
 
               <div>
-                <div className="flex items-center gap-1.5">
-                  <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded border ${posStyle.bg} ${posStyle.text}`}>
-                    {posLetter}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className={`inline-flex items-center text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg border ${posStyle.bg} ${posStyle.text}`}>
+                    {posFullName}
                   </span>
-                  <h3 className="text-base font-extrabold text-white">{player.name}</h3>
+                  <h3 className="text-base font-black uppercase tracking-tight text-white">{player.name}</h3>
                 </div>
 
                 <div className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5">
@@ -219,10 +250,10 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
         )}
 
         {/* Modal Inner Tabs */}
-        <div className="flex border-b border-slate-800 bg-slate-900/50 px-4 pt-2">
+        <div className="flex border-b border-slate-800 bg-slate-900/50 px-4 pt-2 gap-1 overflow-x-auto">
           <button
             onClick={() => setActiveTab('player')}
-            className={`py-2 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 ${
+            className={`py-2 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 shrink-0 ${
               activeTab === 'player'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-slate-400 hover:text-white'
@@ -232,13 +263,23 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('match')}
-            className={`py-2 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 ${
+            className={`py-2 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 shrink-0 ${
               activeTab === 'match'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-slate-400 hover:text-white'
             }`}
           >
-            <Flame className="w-3.5 h-3.5" /> Toate Acțiunile Meciului ({fixture?.events?.length || 0})
+            <Flame className="w-3.5 h-3.5" /> Cronologie Meci ({fixture?.events?.length || 0})
+          </button>
+          <button
+            onClick={() => setActiveTab('rules')}
+            className={`py-2 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 shrink-0 ${
+              activeTab === 'rules'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5" /> Grilă Puncte Live
           </button>
         </div>
 
@@ -305,29 +346,35 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
                 </div>
               )}
 
-              {/* Live Scoring Contribution Matrix */}
+              {/* Quick Preview Scoring Matrix for Position */}
               <div className="p-3 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-2">
-                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
-                  Reguli Punctaj Poziție ({posLetter})
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                    Puncte Cheie Poziție ({posFullName})
+                  </span>
+                  <button
+                    onClick={() => setActiveTab('rules')}
+                    className="text-[10px] text-emerald-400 hover:underline font-bold"
+                  >
+                    Vezi toate regulile →
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-300">
                   <div className="flex items-center justify-between p-1.5 rounded-lg bg-slate-900 border border-slate-800/80">
                     <span>⚽ Gol marcat</span>
-                    <span className="font-mono text-emerald-400 font-bold">
-                      {player.position === 'GK' || player.position === 'DEF' ? '+60p' : player.position === 'MID' ? '+50p' : '+40p'}
-                    </span>
+                    <span className="font-mono text-emerald-400 font-bold">+50p</span>
                   </div>
                   <div className="flex items-center justify-between p-1.5 rounded-lg bg-slate-900 border border-slate-800/80">
-                    <span>🎯 Pasă decisivă</span>
-                    <span className="font-mono text-emerald-400 font-bold">+25p</span>
+                    <span>🎯 Pasă de gol</span>
+                    <span className="font-mono text-emerald-400 font-bold">+30p</span>
                   </div>
                   <div className="flex items-center justify-between p-1.5 rounded-lg bg-slate-900 border border-slate-800/80">
-                    <span>🛡️ Deposedare / Recuperare</span>
-                    <span className="font-mono text-emerald-400 font-bold">+8p / +4p</span>
+                    <span>🔥 Șut pe poartă</span>
+                    <span className="font-mono text-emerald-400 font-bold">+10p</span>
                   </div>
                   <div className="flex items-center justify-between p-1.5 rounded-lg bg-slate-900 border border-slate-800/80">
-                    <span>🟨 Cartonaș galben</span>
-                    <span className="font-mono text-rose-400 font-bold">-15p</span>
+                    <span>🛡️ Deposedare / Int.</span>
+                    <span className="font-mono text-emerald-400 font-bold">+5p</span>
                   </div>
                 </div>
               </div>
@@ -368,6 +415,61 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
                   Nu sunt acțiuni înregistrate încă pentru acest meci.
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'rules' && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                {LIVE_SCORING_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat.category}
+                    onClick={() => setSelectedRuleCategory(cat.category)}
+                    className={`py-1 px-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                      selectedRuleCategory === cat.category
+                        ? 'bg-emerald-500 text-slate-950 shadow-md'
+                        : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    <span>{cat.icon}</span>
+                    <span>{cat.category}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Rules List for Selected Category */}
+              {(() => {
+                const cur = LIVE_SCORING_CATEGORIES.find((c) => c.category === selectedRuleCategory);
+                if (!cur) return null;
+                return (
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                      {cur.icon} {cur.category} — Puncte per Acțiune
+                    </span>
+                    <div className="space-y-1">
+                      {cur.rules.map((r, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between p-2 rounded-xl bg-slate-850 border border-slate-800 text-xs"
+                        >
+                          <span className="text-slate-200 font-medium">{r.label}</span>
+                          <span
+                            className={`font-mono font-bold px-2 py-0.5 rounded-lg ${
+                              r.type === 'pos'
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                : r.type === 'neg'
+                                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                : 'bg-slate-700 text-slate-300'
+                            }`}
+                          >
+                            {r.points}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>

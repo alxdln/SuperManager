@@ -15,10 +15,12 @@ import {
   AppNotification,
   UserProfile,
   LeagueNewsArticle,
+  MatchEventType,
 } from '../types/football';
 import { INITIAL_PLAYERS, INITIAL_FIXTURES, INITIAL_LEAGUE_NEWS } from '../data/superligaData';
 import { FORMATIONS } from '../data/formations';
 import { calculateEventPoints, formatCurrency, formatFullCurrency } from '../utils/scoringEngine';
+import { loadFirestoreCustomPlayers, saveFirestoreCustomPlayer } from '../lib/firebase';
 
 interface FantasyContextType {
   // User & Auth
@@ -42,7 +44,13 @@ interface FantasyContextType {
 
   // Unified Market (League Listings + Member Listings in the same place)
   unifiedMarketItems: UnifiedMarketItem[];
-  placeMarketOffer: (itemId: string, offerAmount: number) => { success: boolean; message: string; clauseTriggered?: boolean };
+  placeMarketOffer: (itemId: string, offerAmount: number) => {
+    success: boolean;
+    message: string;
+    clauseTriggered?: boolean;
+    isOverdraftExceeded?: boolean;
+    requiredAmount?: number;
+  };
   withdrawMarketOffer: (itemId: string, offerId?: string) => { success: boolean; message: string };
   createMemberListing: (playerId: string, minAskingPrice: number) => { success: boolean; message: string };
   delistPlayerFromMarket: (itemId: string) => { success: boolean; message: string };
@@ -90,13 +98,29 @@ interface FantasyContextType {
 
   // Computed Values & Squad Rules
   squadPointsMatchday: number;
+  rawSquadPointsMatchday: number;
   squadTotalValue: number;
+  squadMarketValue: number;
+  maxOverdraftLimit: number;
+  minAllowedBalance: number;
+  isBudgetNegative: boolean;
+  isOverdraftPenalized: boolean;
   squadCount: number;
   gkCount: number;
   emptyStarterSlotsCount: number;
   emptySlotsPenalty: number;
   isSquadValid: boolean;
   squadValidationErrors: string[];
+
+  // Demo Match (3-Minute Live Simulation)
+  isDemoMatchActive: boolean;
+  demoTimeRemaining: number;
+  demoMinute: number;
+  demoHomeScore: number;
+  demoAwayScore: number;
+  demoEvents: MatchLiveEvent[];
+  startDemoMatch: () => void;
+  resetDemoMatch: () => void;
 }
 
 const STORAGE_KEY = 'supermanager_fantasy_state_v2';
@@ -363,6 +387,14 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     },
   ]);
 
+  // 3-Minute Demo Match State (Realistic match simulation with user's squad players)
+  const [isDemoMatchActive, setIsDemoMatchActive] = useState<boolean>(false);
+  const [demoTimeRemaining, setDemoTimeRemaining] = useState<number>(180); // 180 seconds = 3 minutes real time
+  const [demoMinute, setDemoMinute] = useState<number>(0); // 0 to 90 match minutes
+  const [demoHomeScore, setDemoHomeScore] = useState<number>(0);
+  const [demoAwayScore, setDemoAwayScore] = useState<number>(0);
+  const [demoEvents, setDemoEvents] = useState<MatchLiveEvent[]>([]);
+
   // Save to localStorage
   useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY}_user`, JSON.stringify(user));
@@ -500,8 +532,28 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return emptyStarterSlotsCount * 100;
   }, [emptyStarterSlotsCount]);
 
-  // Compute Squad Points and Total Value
-  const squadPointsMatchday = useMemo(() => {
+  const squadTotalValue = useMemo(() => {
+    const playerMap = new Map(players.map((p) => [p.id, p]));
+    let total = 0;
+    Object.values(squad.startingSlots).forEach((pId) => {
+      if (pId && playerMap.has(pId)) total += playerMap.get(pId)!.marketValue;
+    });
+    squad.benchPlayerIds.forEach((pId) => {
+      if (playerMap.has(pId)) total += playerMap.get(pId)!.marketValue;
+    });
+    return total;
+  }, [players, squad]);
+
+  // Overdraft Financial Computations (-50% max allowed overdraft)
+  const squadMarketValue = squadTotalValue;
+  const maxOverdraftLimit = useMemo(() => Math.round(squadMarketValue * 0.5), [squadMarketValue]);
+  const minAllowedBalance = useMemo(() => -maxOverdraftLimit, [maxOverdraftLimit]);
+  const isBudgetNegative = user.budget < 0;
+  // If user budget is negative when live matches run or matchday starts, points are penalized to 0 in team standings
+  const isOverdraftPenalized = isBudgetNegative;
+
+  // Raw points without overdraft penalty (for player display)
+  const rawSquadPointsMatchday = useMemo(() => {
     let pts = 0;
     const playerMap = new Map(players.map((p) => [p.id, p]));
     const currentConfig = FORMATIONS[squad.formation];
@@ -531,17 +583,11 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return pts;
   }, [players, squad]);
 
-  const squadTotalValue = useMemo(() => {
-    const playerMap = new Map(players.map((p) => [p.id, p]));
-    let total = 0;
-    Object.values(squad.startingSlots).forEach((pId) => {
-      if (pId && playerMap.has(pId)) total += playerMap.get(pId)!.marketValue;
-    });
-    squad.benchPlayerIds.forEach((pId) => {
-      if (playerMap.has(pId)) total += playerMap.get(pId)!.marketValue;
-    });
-    return total;
-  }, [players, squad]);
+  // If overdraft penalized, team points in matchday standings are 0!
+  const squadPointsMatchday = useMemo(() => {
+    if (isOverdraftPenalized) return 0;
+    return rawSquadPointsMatchday;
+  }, [isOverdraftPenalized, rawSquadPointsMatchday]);
 
   // Squad size and Goalkeeper count (Rules: max 16, min 11, min 1 GK)
   const squadCount = useMemo(() => {
@@ -792,22 +838,27 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       };
     }
 
-    if (user.budget < offerAmount) {
-      return {
-        success: false,
-        message: `Fonduri insuficiente! Bugetul tău este de ${formatCurrency(user.budget)}.`,
-      };
-    }
-
     const player = players.find((p) => p.id === item.playerId);
     if (!player) return { success: false, message: 'Jucătorul nu există în baza de date.' };
+
+    // OVERDRAFT CHECK:
+    // Poti intra maxim in minus 50% din valoarea lotului tau (-maxOverdraftLimit).
+    const resultingBudget = user.budget - offerAmount;
+    if (resultingBudget < minAllowedBalance) {
+      return {
+        success: false,
+        isOverdraftExceeded: true,
+        requiredAmount: offerAmount,
+        message: `Ai depășit limita maximă de overdraft! Valoarea lotului tău este de ${formatCurrency(squadTotalValue)}, deci poți intra în minus cel mult 50% (${formatCurrency(minAllowedBalance)}). Bugetul tău ar fi devenit ${formatCurrency(resultingBudget)}. Vinde jucători pentru a continua!`,
+      };
+    }
 
     // Check if the offer meets or exceeds the seller's minimum asking price -> CLAUSE ACTIVATED!
     const isClauseMet = offerAmount >= item.minAskingPrice;
 
     if (isClauseMet) {
       // Instant Transfer Clause Triggered!
-      // Deduct buyer funds
+      // Deduct buyer funds (can go into negative within minAllowedBalance)
       setUser((prev) => ({ ...prev, budget: prev.budget - offerAmount }));
 
       // Add player to buyer squad
@@ -1418,7 +1469,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         })
       );
 
-      if (Math.random() < 0.28) {
+      if (Math.random() < 0.32) {
         const matchPlayers = players.filter(
           (p) => p.clubId === liveFix.homeClubId || p.clubId === liveFix.awayClubId
         );
@@ -1426,24 +1477,94 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         const randPlayer = matchPlayers[Math.floor(Math.random() * matchPlayers.length)];
 
-        const possibleActions: { type: MatchLiveEvent['type']; desc: string }[] = [
-          { type: 'key_pass', desc: 'Pasă de geniu prin apărare care creează o ocazie uriașă!' },
-          { type: 'shot_on_target', desc: 'Șut periculos scos cu greu în corner de portar.' },
-          { type: 'tackle', desc: 'Deposedare chirurgicală fără fault în propriul careu.' },
-          { type: 'recovery', desc: 'Recuperează mingea și inițiază un contraatac rapid.' },
-          { type: 'shot_missed', desc: 'Șut ratat dintr-o poziție promițătoare.' },
-          { type: 'foul', desc: 'Fault dur comis la mijlocul terenului.' },
-          { type: 'save', desc: 'Paradă spectaculoasă a portarului!' },
-        ];
+        // Acțiuni specifice în funcție de poziția jucătorului
+        const actionsPool: { type: MatchLiveEvent['type']; desc: string }[] = [];
 
-        if (Math.random() < 0.06) {
-          possibleActions.unshift({
+        if (randPlayer.position === 'GK') {
+          actionsPool.push(
+            { type: 'save', desc: 'Paradă sigură la colțul scurt!' },
+            { type: 'save_in_box', desc: 'Reflex formidabil la un șut din interiorul careului!' },
+            { type: 'punch', desc: 'Boxează mingea cu siguranță din mijlocul careului!' },
+            { type: 'keeper_sweeper', desc: 'Ieșire curajoasă din poartă pentru a degaja mingea!' },
+            { type: 'high_claim', desc: 'Prinde o centrare înaltă din aer!' },
+            { type: 'pass_forward', desc: 'Degajare precisă direct în jumătatea adversă!' },
+            { type: 'pass_error', desc: 'Degajare greșită trimisă în aut.' }
+          );
+          if (Math.random() < 0.02) {
+            actionsPool.push({ type: 'penalty_conceded', desc: 'Intervenție întârziată în careu și penalty comis! (-25p)' });
+          }
+        } else if (randPlayer.position === 'DEF') {
+          actionsPool.push(
+            { type: 'tackle', desc: 'Deposedare curată fără fault în defensivă!' },
+            { type: 'clearance', desc: 'Respingere salvatoare din careul de 16 metri!' },
+            { type: 'interception', desc: 'Intercepție promptă la o pasă periculoasă!' },
+            { type: 'shot_blocked', desc: 'Blochează cu sacrificiu un șut spre poartă!' },
+            { type: 'aerial_won', desc: 'Duel aerian câștigat autoritar la un corner!' },
+            { type: 'duel_won', desc: 'Câștigă un duel direct la sol cu atacantul!' },
+            { type: 'pass_forward', desc: 'Pasă în terenul advers către mijlocași!' },
+            { type: 'long_pass', desc: 'Lansare lungă milimetrică spre flanc!' },
+            { type: 'foul_drawn', desc: 'Fault obținut inteligent în jumătatea proprie!' },
+            { type: 'duel_lost', desc: 'Duel pierdut în flanc cu extrema adversă.' },
+            { type: 'foul', desc: 'Fault comis în preajma careului.' }
+          );
+          if (Math.random() < 0.04) {
+            actionsPool.push({ type: 'goal_line_clearance', desc: 'Respingere miraculoasă de pe linia porții!' });
+          }
+          if (Math.random() < 0.03) {
+            actionsPool.push({ type: 'penalty_conceded', desc: 'Fault imprudent în careu și penalty comis! (-25p)' });
+          }
+        } else if (randPlayer.position === 'MID') {
+          actionsPool.push(
+            { type: 'pass_forward', desc: 'Pasă verticală precisă în terenul advers!' },
+            { type: 'key_pass', desc: 'Pasă cheie genială care desface defensiva adversă!' },
+            { type: 'long_pass', desc: 'Pasă lungă de 40m care schimbă direcția de joc!' },
+            { type: 'cross_successful', desc: 'Centrare excelentă în careu pentru atacanți!' },
+            { type: 'dribble_success', desc: 'Dribling elegant prin care depășește adversarul!' },
+            { type: 'shot_on_target', desc: 'Șut cadrat pe spațiul porții de la distanță!' },
+            { type: 'tackle', desc: 'Deposedare energică la mijlocul terenului!' },
+            { type: 'interception', desc: 'Intercepție rapidă care declanșează contraatacul!' },
+            { type: 'duel_won', desc: 'Duel fizic câștigat la centrul terenului!' },
+            { type: 'foul_drawn', desc: 'Fault obținut în preajma careului advers!' },
+            { type: 'pass_error', desc: 'Pasă greșită la construcție.' },
+            { type: 'dispossessed', desc: 'Deposedat sub presiunea adversarilor.' },
+            { type: 'shot_missed', desc: 'Șut trimis peste poartă.' }
+          );
+        } else {
+          // FWD
+          actionsPool.push(
+            { type: 'shot_on_target', desc: 'Șut periculos pe poartă respins în corner!' },
+            { type: 'key_pass', desc: 'Pasă cheie în adâncime pentru coechipier!' },
+            { type: 'dribble_success', desc: 'Dribling în viteză la marginea careului!' },
+            { type: 'aerial_won', desc: 'Duel aerian câștigat în careul advers!' },
+            { type: 'duel_won', desc: 'Păstrează mingea cu spatele la poartă și câștigă duelul!' },
+            { type: 'foul_drawn', desc: 'Fault obținut la marginea careului mare!' },
+            { type: 'pass_forward', desc: 'Pasă combinativă în terenul advers!' },
+            { type: 'shot_missed', desc: 'Șut pe lângă poartă din poziție bună.' },
+            { type: 'dispossessed', desc: 'Deposedat în încercarea de finalizare.' },
+            { type: 'duel_lost', desc: 'Duel pierdut cu fundașul central.' }
+          );
+          if (Math.random() < 0.08) {
+            actionsPool.push({ type: 'penalty_won', desc: 'Pătrundere în careu și penalty obținut!' });
+          }
+          if (Math.random() < 0.06) {
+            actionsPool.push({ type: 'big_chance_missed', desc: 'Ocazie mare de gol ratată singur cu portarul!' });
+          }
+        }
+
+        // Gol marcat sau pasă de gol
+        if (Math.random() < 0.07) {
+          actionsPool.unshift({
             type: 'goal',
             desc: `Gooool! Finalizare impecabilă din interiorul careului!`,
           });
+        } else if (Math.random() < 0.08) {
+          actionsPool.unshift({
+            type: 'assist',
+            desc: `Pasă de gol de maestru care lasă coechipierul singur cu poarta!`,
+          });
         }
 
-        const action = possibleActions[Math.floor(Math.random() * possibleActions.length)];
+        const action = actionsPool[Math.floor(Math.random() * actionsPool.length)];
         const points = calculateEventPoints(action.type, randPlayer.position);
 
         injectCustomEvent(liveFix.id, {
@@ -1701,6 +1822,11 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     setPlayers((prev) => [newP, ...prev]);
 
+    // Save persistently to Firestore database
+    saveFirestoreCustomPlayer(newP).catch((err) => {
+      console.warn('Eroare la salvarea în Firestore:', err);
+    });
+
     // Automatically list new player on the unified market from the League!
     const newListing: UnifiedMarketItem = {
       id: `mkt_${Date.now()}`,
@@ -1772,6 +1898,188 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     );
   };
 
+  // 3-MINUTE DEMO MATCH ENGINE
+  const startDemoMatch = useCallback(() => {
+    setIsDemoMatchActive(true);
+    setDemoTimeRemaining(180);
+    setDemoMinute(1);
+    setDemoHomeScore(0);
+    setDemoAwayScore(0);
+    setDemoEvents([
+      {
+        id: `demo_start_${Date.now()}`,
+        minute: 1,
+        type: 'starter_bonus',
+        playerId: 'sys_start',
+        playerName: 'SuperManager Live',
+        clubId: 'c_superliga',
+        pointsChange: 0,
+        description: 'Fluier de start în Meciul Demo! Partida a început cu fotbaliștii din lotul tău.',
+      },
+    ]);
+    addNotification({
+      title: '🎮 Meci Demo Pornit (3 Minute)!',
+      message: 'Meciul simulat rulează accelerat (3 minute = 90 min de joc real) cu fotbaliștii din lotul tău.',
+      type: 'live_event',
+    });
+  }, [addNotification]);
+
+  const resetDemoMatch = useCallback(() => {
+    setIsDemoMatchActive(false);
+    setDemoTimeRemaining(180);
+    setDemoMinute(0);
+    setDemoHomeScore(0);
+    setDemoAwayScore(0);
+    setDemoEvents([]);
+  }, []);
+
+  // Accelerated 3-Minute Real-Time Demo Match Timer Loop
+  useEffect(() => {
+    if (!isDemoMatchActive) return;
+
+    const interval = setInterval(() => {
+      setDemoTimeRemaining((prevRemaining) => {
+        if (prevRemaining <= 1) {
+          clearInterval(interval);
+          setIsDemoMatchActive(false);
+          setDemoMinute(90);
+          setDemoEvents((prev) => [
+            {
+              id: `demo_end_${Date.now()}`,
+              minute: 90,
+              type: 'match_won',
+              playerId: 'sys_end',
+              playerName: 'SuperManager Live',
+              clubId: 'c_superliga',
+              pointsChange: 0,
+              description: 'Fluier Final! Meciul Demo s-a încheiat. Punctele fotbaliștilor tăi au fost calculate!',
+            },
+            ...prev,
+          ]);
+          addNotification({
+            title: '🏁 Fluier Final în Meciul Demo!',
+            message: 'Meciul de 3 minute s-a încheiat! Verifică punctele acumulate de jucători.',
+            type: 'reward',
+          });
+          return 0;
+        }
+
+        const nextRemaining = prevRemaining - 1;
+        const elapsed = 180 - nextRemaining;
+        const currentMatchMin = Math.min(90, Math.max(1, Math.floor((elapsed / 180) * 90)));
+        setDemoMinute(currentMatchMin);
+
+        // Realistic event cadence: trigger event with ~22% chance per second (~18-20 events total in 3 min)
+        if (Math.random() < 0.22) {
+          const starters = Object.values(squad.startingSlots).filter(Boolean) as string[];
+          const squadIds = starters.length > 0 ? starters : squad.benchPlayerIds;
+          const squadPool = players.filter((p) => squadIds.includes(p.id));
+          const targetPlayer = squadPool.length > 0
+            ? squadPool[Math.floor(Math.random() * squadPool.length)]
+            : players[0];
+
+          if (targetPlayer) {
+            const isGK = targetPlayer.position === 'GK';
+            const isDEF = targetPlayer.position === 'DEF';
+            const isMID = targetPlayer.position === 'MID';
+
+            type EventOption = {
+              type: MatchEventType;
+              desc: string;
+              points: number;
+              statKey?: keyof Player['stats'];
+              isHomeGoal?: boolean;
+              isAwayGoal?: boolean;
+            };
+
+            const options: EventOption[] = [];
+
+            if (isGK) {
+              options.push(
+                { type: 'penalty_save', desc: `Paradă de senzație! ${targetPlayer.name} respinge spectaculos un penalty!`, points: 75, statKey: 'penaltySaves' },
+                { type: 'save', desc: `${targetPlayer.name} reține cu siguranță o minge periculoasă la colțul lung.`, points: 20, statKey: 'cleanSheets' },
+                { type: 'pass_forward', desc: `Degajare milimetrică reușită de ${targetPlayer.name} pentru contraatac.`, points: 5, statKey: 'passesCompleted' }
+              );
+            } else if (isDEF) {
+              options.push(
+                { type: 'tackle', desc: `Intervenție de clasă prin alunecare a lui ${targetPlayer.name}!`, points: 15, statKey: 'tacklesWon' },
+                { type: 'recovery', desc: `${targetPlayer.name} recuperează și pasează sigur în linia mediană.`, points: 8, statKey: 'recoveries' },
+                { type: 'foul', desc: `Fault comis de ${targetPlayer.name} pentru oprirea unei faze periculoase.`, points: -6, statKey: 'foulsCommitted' },
+                { type: 'yellow_card', desc: `Cartonaș galben primit de ${targetPlayer.name} în minutul ${currentMatchMin}.`, points: -15, statKey: 'yellowCards' }
+              );
+            } else if (isMID) {
+              options.push(
+                { type: 'key_pass', desc: `Pasă luminoasă printre linii expediată de ${targetPlayer.name}.`, points: 15, statKey: 'keyPasses' },
+                { type: 'shot_on_target', desc: `Șut cadrat periculos pe spațiul porții expediat de ${targetPlayer.name}!`, points: 12, statKey: 'shotsOnTarget' },
+                { type: 'recovery', desc: `Presing sufocant și minge câștigată de ${targetPlayer.name}.`, points: 10, statKey: 'recoveries' },
+                { type: 'assist', desc: `Assist genial semnat de ${targetPlayer.name}!`, points: 35, statKey: 'assists', isHomeGoal: true }
+              );
+            } else {
+              // FWD
+              options.push(
+                { type: 'shot_on_target', desc: `${targetPlayer.name} fentează elegant și trage puternic!`, points: 15, statKey: 'shotsOnTarget' },
+                { type: 'goal', desc: `⚽ GOOOL MAGNIFIC! ${targetPlayer.name} înscrie cu un șut la vinclu!`, points: 50, statKey: 'goals', isHomeGoal: true },
+                { type: 'foul_drawn', desc: `${targetPlayer.name} scoate o lovitură liberă la marginea careului.`, points: 8, statKey: 'foulsDrawn' }
+              );
+            }
+
+            // Rare opponent goal for realistic scoreline
+            if (Math.random() < 0.2) {
+              options.push({
+                type: 'goal',
+                desc: 'Adversarii finalizează un atac rapid și marchează.',
+                points: -10,
+                isAwayGoal: true,
+              });
+            }
+
+            const chosen = options[Math.floor(Math.random() * options.length)];
+
+            if (chosen.isHomeGoal) setDemoHomeScore((s) => s + 1);
+            if (chosen.isAwayGoal) setDemoAwayScore((s) => s + 1);
+
+            const ev: MatchLiveEvent = {
+              id: `demo_ev_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              minute: currentMatchMin,
+              type: chosen.type,
+              playerId: chosen.isAwayGoal ? 'opp_rival' : targetPlayer.id,
+              playerName: chosen.isAwayGoal ? 'Oponenți' : targetPlayer.name,
+              clubId: chosen.isAwayGoal ? 'c_opp' : targetPlayer.clubId,
+              pointsChange: chosen.points,
+              description: chosen.desc,
+            };
+
+            setDemoEvents((prev) => [ev, ...prev]);
+
+            if (!chosen.isAwayGoal) {
+              setPlayers((prev) =>
+                prev.map((p) => {
+                  if (p.id === targetPlayer.id) {
+                    const updatedStats = { ...p.stats };
+                    if (chosen.statKey && typeof updatedStats[chosen.statKey] === 'number') {
+                      (updatedStats[chosen.statKey] as number) += 1;
+                    }
+                    return {
+                      ...p,
+                      pointsMatchday: Math.max(0, p.pointsMatchday + chosen.points),
+                      pointsTotal: p.pointsTotal + chosen.points,
+                      stats: updatedStats,
+                    };
+                  }
+                  return p;
+                })
+              );
+            }
+          }
+        }
+
+        return nextRemaining;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isDemoMatchActive, squad, players, addNotification]);
+
   return (
     <FantasyContext.Provider
       value={{
@@ -1823,13 +2131,27 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updatePlayerStatus,
         updatePlayerMarketValue,
         squadPointsMatchday,
+        rawSquadPointsMatchday,
         squadTotalValue,
+        squadMarketValue,
+        maxOverdraftLimit,
+        minAllowedBalance,
+        isBudgetNegative,
+        isOverdraftPenalized,
         squadCount,
         gkCount,
         emptyStarterSlotsCount,
         emptySlotsPenalty,
         isSquadValid,
         squadValidationErrors,
+        isDemoMatchActive,
+        demoTimeRemaining,
+        demoMinute,
+        demoHomeScore,
+        demoAwayScore,
+        demoEvents,
+        startDemoMatch,
+        resetDemoMatch,
       }}
     >
       {children}

@@ -3,14 +3,31 @@ import { useFantasy } from '../../context/FantasyContext';
 import { SUPERLIGA_CLUBS, SUPERLIGA_STANDINGS } from '../../data/superligaData';
 import { Player, PlayerPosition, Fixture } from '../../types/football';
 import { PlayerLiveStreamModal } from './PlayerLiveStreamModal';
-import { Play, Pause, Activity, Flame, Shield, Award, Clock, ChevronRight, Users, CheckCircle2, AlertCircle } from 'lucide-react';
+import {
+  Play,
+  Pause,
+  Activity,
+  Flame,
+  Shield,
+  Award,
+  Clock,
+  ChevronRight,
+  Users,
+  CheckCircle2,
+  AlertCircle,
+  RotateCcw,
+  Sparkles,
+  Timer,
+  Zap,
+  AlertTriangle,
+} from 'lucide-react';
 import { formatCurrency, formatFullCurrency } from '../../utils/scoringEngine';
 
-const shortPosMap: Record<PlayerPosition, 'P' | 'D' | 'M' | 'A'> = {
-  GK: 'P',
-  DEF: 'D',
-  MID: 'M',
-  FWD: 'A',
+const fullPosMap: Record<PlayerPosition, string> = {
+  GK: 'PORTAR',
+  DEF: 'FUNDAȘ',
+  MID: 'MIJLOCAȘ',
+  FWD: 'ATACANT',
 };
 
 const posColorMap: Record<PlayerPosition, { bg: string; text: string }> = {
@@ -22,6 +39,7 @@ const posColorMap: Record<PlayerPosition, { bg: string; text: string }> = {
 
 export const LiveMatchdayView: React.FC = () => {
   const {
+    user,
     fixtures,
     players,
     squad,
@@ -30,7 +48,18 @@ export const LiveMatchdayView: React.FC = () => {
     simulationSpeed,
     setSimulationSpeed,
     squadPointsMatchday,
+    rawSquadPointsMatchday,
     squadTotalValue,
+    isBudgetNegative,
+    isOverdraftPenalized,
+    isDemoMatchActive,
+    demoTimeRemaining,
+    demoMinute,
+    demoHomeScore,
+    demoAwayScore,
+    demoEvents,
+    startDemoMatch,
+    resetDemoMatch,
   } = useFantasy();
 
   // Primary tab is "myPlayers" as requested by user
@@ -73,7 +102,7 @@ export const LiveMatchdayView: React.FC = () => {
     const isCaptain = squad.captainPlayerId === player.id;
     const playerClub = SUPERLIGA_CLUBS.find((c) => c.id === player.clubId);
     const fixture = getPlayerFixture(player.clubId);
-    const posLetter = shortPosMap[player.position];
+    const posFullName = fullPosMap[player.position];
     const posStyle = posColorMap[player.position];
 
     // Determine opponent and status
@@ -120,11 +149,11 @@ export const LiveMatchdayView: React.FC = () => {
           </div>
 
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded border ${posStyle.bg} ${posStyle.text}`}>
-                {posLetter}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={`inline-flex items-center text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg border ${posStyle.bg} ${posStyle.text}`}>
+                {posFullName}
               </span>
-              <span className="text-sm font-bold text-white truncate">{player.name}</span>
+              <span className="text-sm font-extrabold uppercase tracking-tight text-white truncate">{player.name}</span>
               {isCaptain && (
                 <span className="text-[10px] font-bold text-amber-300">👑 (x2)</span>
               )}
@@ -188,8 +217,168 @@ export const LiveMatchdayView: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-3.5 pb-20">
+      {/* Overdraft Alert Banner if team is negative at round start */}
+      {isOverdraftPenalized && (
+        <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3 shadow-md">
+          <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0 mt-0.5">
+            <AlertTriangle className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-black uppercase tracking-wider text-amber-300">
+                Avertisment Sold Negativ ({formatCurrency(user.budget)})
+              </span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                Puncte Înghețate în Clasament
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+              Jucătorii tăi acumulează acțiuni și puncte în meci în mod normal (total brut: <b className="text-white font-mono">{rawSquadPointsMatchday} pts</b>), însă în clasamentul live și cel general nu se adaugă punctele echipei până când soldul nu revine pe plus înainte de salvarea etapei!
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* 3-Minute Demo Match Arena Card */}
+      <div className={`p-4 rounded-2xl border transition-all ${
+        isDemoMatchActive
+          ? 'bg-gradient-to-br from-indigo-950/60 via-slate-900 to-emerald-950/40 border-emerald-500/50 shadow-lg shadow-emerald-500/10'
+          : 'bg-slate-900/90 border-slate-800'
+      }`}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5">
+            <div className={`p-2 rounded-xl ${isDemoMatchActive ? 'bg-emerald-500/20 text-emerald-400 animate-pulse' : 'bg-indigo-500/20 text-indigo-400'}`}>
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-black uppercase tracking-wider text-white">
+                  Meci Demonstrativ (3 Minute)
+                </span>
+                {isDemoMatchActive ? (
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-rose-600 text-white animate-pulse">
+                    LIVE ACUM
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-slate-800 text-slate-400">
+                    Pregătit
+                  </span>
+                )}
+              </div>
+              <span className="text-[11px] text-slate-400 block mt-0.5">
+                Simulare realistă accelerată (3 min = 90 min de joc) cu fotbaliștii din lotul tău
+              </span>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {isDemoMatchActive ? (
+              <>
+                <button
+                  onClick={resetDemoMatch}
+                  className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 inline-flex items-center gap-1.5 active:scale-95 transition-all"
+                  title="Oprește meciul demo"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Resetează</span>
+                </button>
+                <button
+                  onClick={startDemoMatch}
+                  className="py-2 px-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black uppercase tracking-wider text-xs shadow-md shadow-emerald-500/20 inline-flex items-center gap-1.5 active:scale-95 transition-all"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Restart Meci</span>
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={startDemoMatch}
+                className="py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black uppercase tracking-wider text-xs shadow-lg shadow-emerald-500/25 inline-flex items-center gap-2 active:scale-95 transition-all"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                <span>Meci Demo</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Active Demo Match Scoreboard and Timer */}
+        {isDemoMatchActive && (
+          <div className="mt-3.5 pt-3.5 border-t border-slate-800/80 space-y-3">
+            {/* Scoreboard */}
+            <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between gap-3 text-center flex-wrap">
+              <div className="flex-1 min-w-[100px]">
+                <span className="text-xs font-black uppercase text-emerald-400 block truncate">
+                  {user.teamName}
+                </span>
+                <span className="text-[10px] text-slate-400">Echipa Ta</span>
+              </div>
+
+              <div className="flex items-center gap-3 shrink-0">
+                <span className="font-mono text-2xl font-black text-white">
+                  {demoHomeScore} - {demoAwayScore}
+                </span>
+              </div>
+
+              <div className="flex-1 min-w-[100px]">
+                <span className="text-xs font-black uppercase text-slate-300 block truncate">
+                  Oponenți Superliga
+                </span>
+                <span className="text-[10px] text-slate-400">Rivali Etapă</span>
+              </div>
+            </div>
+
+            {/* Timers Strip */}
+            <div className="grid grid-cols-2 gap-2 text-center text-xs">
+              <div className="p-2 rounded-xl bg-slate-800/50 border border-slate-700/60 flex items-center justify-center gap-2">
+                <Timer className="w-4 h-4 text-emerald-400 animate-spin" />
+                <span className="text-slate-300">Timp Rămas:</span>
+                <b className="font-mono text-emerald-400">
+                  {Math.floor(demoTimeRemaining / 60).toString().padStart(2, '0')}:
+                  {(demoTimeRemaining % 60).toString().padStart(2, '0')}
+                </b>
+              </div>
+
+              <div className="p-2 rounded-xl bg-slate-800/50 border border-slate-700/60 flex items-center justify-center gap-2">
+                <Clock className="w-4 h-4 text-amber-400" />
+                <span className="text-slate-300">Minut Meci:</span>
+                <b className="font-mono text-amber-300">{demoMinute}&apos; / 90&apos;</b>
+              </div>
+            </div>
+
+            {/* Live Events Stream */}
+            {demoEvents.length > 0 && (
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block px-1">
+                  Flux Evenimente în Timp Real
+                </span>
+                {demoEvents.slice(0, 6).map((ev) => (
+                  <div
+                    key={ev.id}
+                    className="p-2 rounded-xl bg-slate-800/70 border border-slate-700/60 flex items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-mono text-[11px] font-bold text-amber-400 shrink-0">
+                        {ev.minute}&apos;
+                      </span>
+                      <span className="text-slate-200 text-xs truncate">{ev.description}</span>
+                    </div>
+                    {ev.pointsChange !== 0 && (
+                      <span className={`font-mono text-xs font-black shrink-0 ${ev.pointsChange > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {ev.pointsChange > 0 ? `+${ev.pointsChange}p` : `${ev.pointsChange}p`}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Simulation Minute-by-Minute Live Engine Controller Strip */}
-      <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-2xl flex items-center justify-between text-xs shadow-sm">
+      <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-2xl flex items-center justify-between text-xs shadow-sm flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <span className="flex h-2.5 w-2.5 relative">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75"></span>
@@ -301,8 +490,13 @@ export const LiveMatchdayView: React.FC = () => {
                 Puncte Etapă
               </span>
               <span className="font-mono text-xl font-black text-amber-400 block mt-0.5">
-                {squadPointsMatchday} pts
+                {rawSquadPointsMatchday} pts
               </span>
+              {isOverdraftPenalized && (
+                <span className="text-[9px] font-bold text-amber-400 block mt-0.5">
+                  (0 pts în clasament)
+                </span>
+              )}
             </div>
 
             <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-center">
@@ -542,8 +736,8 @@ export const LiveMatchdayView: React.FC = () => {
 
       {/* TAB 3: CLASAMENT SUPERLIGA */}
       {activeTab === 'table' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 overflow-hidden">
-          <div className="flex items-center justify-between mb-3">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <div>
               <h3 className="text-sm font-bold text-white">Clasament Real Superliga 2024/2025</h3>
               <p className="text-[11px] text-slate-400">Date sincronizate oficial LPF / Opta</p>
@@ -717,7 +911,7 @@ export const LiveMatchdayView: React.FC = () => {
               .slice(0, 15)
               .map((p, idx) => {
                 const club = SUPERLIGA_CLUBS.find((c) => c.id === p.clubId);
-                const posLetter = shortPosMap[p.position];
+                const posFullName = fullPosMap[p.position];
                 const posStyle = posColorMap[p.position];
                 const matchesPlayed = Math.max(p.stats?.matches || 1, 1);
                 const avgPts = (p.pointsTotal / matchesPlayed).toFixed(1);
@@ -753,11 +947,11 @@ export const LiveMatchdayView: React.FC = () => {
                         }}
                       />
                       <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border ${posStyle.bg} ${posStyle.text}`}>
-                            {posLetter}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={`inline-flex items-center text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg border ${posStyle.bg} ${posStyle.text}`}>
+                            {posFullName}
                           </span>
-                          <span className="text-xs font-bold text-white">{p.name}</span>
+                          <span className="text-xs font-extrabold uppercase tracking-tight text-white">{p.name}</span>
                         </div>
                         <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
                           <span>{club?.shortName}</span>

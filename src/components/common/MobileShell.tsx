@@ -39,7 +39,7 @@ export const MobileShell: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#070b12] text-slate-100 flex flex-col items-center justify-start p-0 sm:py-6 sm:px-4 font-sans selection:bg-emerald-500 selection:text-slate-950">
+    <div className="min-h-screen bg-[#181b22] text-slate-100 flex flex-col items-center justify-start p-0 sm:py-6 sm:px-4 font-sans selection:bg-emerald-500 selection:text-slate-950">
       {/* Device Mode Switcher (Floating on Desktop) */}
       <div className="hidden sm:flex items-center gap-3 mb-4 bg-slate-900/90 backdrop-blur-md border border-slate-800 p-1.5 px-3 rounded-2xl shadow-xl z-30">
         <span className="text-xs text-slate-400 font-medium">Format vizualizare:</span>
@@ -68,17 +68,17 @@ export const MobileShell: React.FC = () => {
         </button>
       </div>
 
-      {/* Main Container: either Phone Mockup or Full Viewport */}
+      {/* Main Container: modern slate-gray background */}
       <div
         className={`w-full transition-all duration-300 relative flex flex-col ${
           isIPhoneFrame
-            ? 'max-w-[430px] min-h-[880px] bg-slate-950 sm:rounded-[48px] sm:border-[8px] sm:border-slate-800/90 sm:shadow-[0_25px_70px_rgba(0,0,0,0.85)] sm:ring-1 sm:ring-slate-700/50 overflow-hidden'
-            : 'max-w-5xl bg-slate-950 sm:rounded-3xl sm:border border-slate-800 p-2 sm:p-6 shadow-2xl'
+            ? 'max-w-[430px] h-[100dvh] sm:h-[880px] sm:max-h-[92vh] bg-[#14161d] sm:rounded-[48px] sm:border-[8px] sm:border-slate-800/90 sm:shadow-[0_25px_70px_rgba(0,0,0,0.85)] sm:ring-1 sm:ring-slate-700/50 overflow-hidden'
+            : 'max-w-5xl bg-[#14161d] sm:rounded-3xl sm:border border-slate-800/80 p-2 sm:p-6 shadow-2xl min-h-screen pb-24'
         }`}
       >
         {/* iOS Dynamic Island & Status Bar (Only in Phone Frame) */}
         {isIPhoneFrame && (
-          <div className="sticky top-0 z-40 bg-slate-950/95 backdrop-blur-md pt-2 px-6 pb-1 flex items-center justify-between text-xs text-slate-300 select-none">
+          <div className="shrink-0 sticky top-0 z-40 bg-[#161922]/95 backdrop-blur-md pt-2 px-6 pb-1 flex items-center justify-between text-xs text-slate-300 select-none">
             <span className="font-semibold font-mono tracking-tight text-[13px]">20:30</span>
 
             {/* Dynamic Island Pill */}
@@ -97,7 +97,7 @@ export const MobileShell: React.FC = () => {
         )}
 
         {/* Top iOS App Bar Header */}
-        <header className="sticky top-0 z-30 bg-slate-950/90 backdrop-blur-md px-4 py-3 border-b border-slate-800/80 flex items-center justify-between gap-3">
+        <header className="shrink-0 sticky top-0 z-30 bg-[#161922]/95 backdrop-blur-md px-4 py-3 border-b border-slate-800/80 flex items-center justify-between gap-3">
           {/* User profile trigger */}
           <div
             onClick={() => setShowSettings(true)}
@@ -163,7 +163,7 @@ export const MobileShell: React.FC = () => {
         </header>
 
         {/* Scrollable Main Content Body */}
-        <main className="flex-1 overflow-y-auto px-3.5 py-4">
+        <main className={`flex-1 overflow-y-auto px-3.5 py-4 min-h-0 overscroll-contain ${!isIPhoneFrame ? 'pb-24 sm:pb-28' : ''}`}>
           {activeTab === 'squad' && <TacticalPitchView />}
           {activeTab === 'live' && <LiveMatchdayView />}
           {activeTab === 'market' && <TransferMarketView />}
@@ -171,74 +171,82 @@ export const MobileShell: React.FC = () => {
           {activeTab === 'hub' && <SuperPredictorAndRewardsView />}
         </main>
 
-        {/* iOS Native Bottom Tab Bar */}
-        <nav className="sticky bottom-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-slate-800/80 px-2 py-1.5 pb-2 sm:pb-3 shadow-2xl">
-          <div className="grid grid-cols-5 items-center">
-            {/* Tab 1: Squad */}
-            <button
-              onClick={() => setActiveTab('squad')}
-              className={`flex flex-col items-center justify-center py-1 transition-all ${
-                activeTab === 'squad' ? 'text-emerald-400 scale-105' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Shield className={`w-5 h-5 ${activeTab === 'squad' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-              <span className="text-[10px] font-bold tracking-tight mt-1">Echipa</span>
-            </button>
+        {/* iOS Native Bottom Tab Bar: Fixat jos permanent */}
+        <nav
+          className={
+            isIPhoneFrame
+              ? 'shrink-0 z-40 bg-[#161922]/95 backdrop-blur-lg border-t border-slate-800/80 px-2 py-1.5 pb-2 sm:pb-3 shadow-2xl select-none'
+              : 'fixed bottom-0 left-0 right-0 z-40 bg-[#161922]/95 backdrop-blur-lg border-t border-slate-800/80 shadow-2xl select-none'
+          }
+        >
+          <div className={!isIPhoneFrame ? 'max-w-xl mx-auto px-2 py-1 pb-2' : ''}>
+            <div className="grid grid-cols-5 items-center">
+              {/* Tab 1: Squad */}
+              <button
+                onClick={() => setActiveTab('squad')}
+                className={`flex flex-col items-center justify-center py-1 transition-all ${
+                  activeTab === 'squad' ? 'text-emerald-400 scale-105' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Shield className={`w-5 h-5 ${activeTab === 'squad' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-center mt-1">Echipa</span>
+              </button>
 
-            {/* Tab 2: Meci (doar cu badge-ul de sus care pulsează) */}
-            <button
-              onClick={() => setActiveTab('live')}
-              className={`flex flex-col items-center justify-center py-1 transition-all relative ${
-                activeTab === 'live' ? 'text-emerald-400 scale-105' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <div className="relative">
-                <Flame className={`w-5 h-5 ${activeTab === 'live' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-                <span className="absolute -top-1 -right-3.5 bg-rose-600 text-white text-[7px] font-black px-1 py-0.2 rounded-full shadow tracking-tighter animate-pulse">
-                  LIVE
-                </span>
-              </div>
-              <span className="text-[10px] font-bold tracking-tight mt-1">Meci</span>
-            </button>
+              {/* Tab 2: Meci (doar cu badge-ul de sus care pulsează) */}
+              <button
+                onClick={() => setActiveTab('live')}
+                className={`flex flex-col items-center justify-center py-1 transition-all relative ${
+                  activeTab === 'live' ? 'text-emerald-400 scale-105' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <div className="relative">
+                  <Flame className={`w-5 h-5 ${activeTab === 'live' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+                  <span className="absolute -top-1 -right-3.5 bg-rose-600 text-white text-[7px] font-black px-1 py-0.2 rounded-full shadow tracking-tighter animate-pulse">
+                    LIVE
+                  </span>
+                </div>
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-center mt-1">Meci</span>
+              </button>
 
-            {/* Tab 3: Market */}
-            <button
-              onClick={() => setActiveTab('market')}
-              className={`flex flex-col items-center justify-center py-1 transition-all ${
-                activeTab === 'market' ? 'text-emerald-400 scale-105' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Store className={`w-5 h-5 ${activeTab === 'market' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-              <span className="text-[10px] font-bold tracking-tight mt-1">Piață</span>
-            </button>
+              {/* Tab 3: Market / Transferuri */}
+              <button
+                onClick={() => setActiveTab('market')}
+                className={`flex flex-col items-center justify-center py-1 transition-all ${
+                  activeTab === 'market' ? 'text-emerald-400 scale-105' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Store className={`w-5 h-5 ${activeTab === 'market' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-center mt-1">Transferuri</span>
+              </button>
 
-            {/* Tab 4: Leaderboard */}
-            <button
-              onClick={() => setActiveTab('leaderboard')}
-              className={`flex flex-col items-center justify-center py-1 transition-all ${
-                activeTab === 'leaderboard' ? 'text-emerald-400 scale-105' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Trophy className={`w-5 h-5 ${activeTab === 'leaderboard' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-              <span className="text-[10px] font-bold tracking-tight mt-1">Clasament</span>
-            </button>
+              {/* Tab 4: Leaderboard */}
+              <button
+                onClick={() => setActiveTab('leaderboard')}
+                className={`flex flex-col items-center justify-center py-1 transition-all ${
+                  activeTab === 'leaderboard' ? 'text-emerald-400 scale-105' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Trophy className={`w-5 h-5 ${activeTab === 'leaderboard' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-center mt-1">Clasament</span>
+              </button>
 
-            {/* Tab 5: Predictor */}
-            <button
-              onClick={() => setActiveTab('hub')}
-              className={`flex flex-col items-center justify-center py-1 transition-all ${
-                activeTab === 'hub' ? 'text-emerald-400 scale-105' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Coins className={`w-5 h-5 ${activeTab === 'hub' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-              <span className="text-[10px] font-bold tracking-tight mt-1">Predictor</span>
-            </button>
+              {/* Tab 5: Predictor / Predicții */}
+              <button
+                onClick={() => setActiveTab('hub')}
+                className={`flex flex-col items-center justify-center py-1 transition-all ${
+                  activeTab === 'hub' ? 'text-emerald-400 scale-105' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Coins className={`w-5 h-5 ${activeTab === 'hub' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-center mt-1">Predicții</span>
+              </button>
+            </div>
+
+            {/* iOS Home Indicator Bar */}
+            {isIPhoneFrame && (
+              <div className="w-32 h-1 bg-slate-700/60 rounded-full mx-auto mt-2 select-none" />
+            )}
           </div>
-
-          {/* iOS Home Indicator Bar */}
-          {isIPhoneFrame && (
-            <div className="w-32 h-1 bg-slate-700/60 rounded-full mx-auto mt-2 select-none" />
-          )}
         </nav>
 
         {/* Notifications Modal */}

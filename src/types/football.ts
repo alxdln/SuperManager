@@ -152,22 +152,61 @@ export interface LeagueNewsArticle {
   avatar?: string;
 }
 
+export type MatchEventType =
+  // Pase & Atac
+  | 'pass_forward'
+  | 'pass_error'
+  | 'key_pass'
+  | 'long_pass'
+  | 'assist'
+  | 'cross_successful'
+  | 'shot_on_target'
+  | 'goal'
+  | 'shot_missed'
+  | 'big_chance_missed'
+  | 'dribble_success'
+  | 'dispossessed'
+  | 'penalty_won'
+  | 'penalty_missed'
+  // Dueluri & Apărare
+  | 'tackle'
+  | 'clearance'
+  | 'shot_blocked'
+  | 'interception'
+  | 'duel_won'
+  | 'duel_lost'
+  | 'aerial_won'
+  | 'aerial_lost'
+  | 'goal_line_clearance'
+  | 'dribbled_past'
+  | 'error_lead_to_goal'
+  // Disciplină & Faulturi
+  | 'foul'
+  | 'foul_drawn'
+  | 'penalty_conceded'
+  | 'yellow_card'
+  | 'red_card'
+  // Portar
+  | 'save'
+  | 'save_in_box'
+  | 'penalty_save'
+  | 'punch'
+  | 'keeper_sweeper'
+  | 'high_claim'
+  // Meci & Prezență
+  | 'clean_sheet_bonus'
+  | 'starter_bonus'
+  | 'substitute_in_bonus'
+  | 'match_won'
+  | 'match_lost'
+  | 'match_draw'
+  | 'minutes_bonus'
+  | 'recovery';
+
 export interface MatchLiveEvent {
   id: string;
   minute: number;
-  type: 
-    | 'goal'
-    | 'assist'
-    | 'shot_on_target'
-    | 'shot_missed'
-    | 'tackle'
-    | 'recovery'
-    | 'key_pass'
-    | 'yellow_card'
-    | 'red_card'
-    | 'save'
-    | 'clean_sheet_bonus'
-    | 'foul';
+  type: MatchEventType;
   playerId: string;
   playerName: string;
   clubId: string;

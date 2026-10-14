@@ -22,6 +22,7 @@ import { SUPERLIGA_CLUBS } from '../../data/superligaData';
 
 export const TacticalPitchView: React.FC = () => {
   const {
+    user,
     squad,
     players,
     changeFormation,
@@ -29,12 +30,17 @@ export const TacticalPitchView: React.FC = () => {
     removePlayerFromSlot,
     setCaptain,
     squadPointsMatchday,
+    rawSquadPointsMatchday,
     squadTotalValue,
     squadCount,
     gkCount,
     emptyStarterSlotsCount,
     emptySlotsPenalty,
     isSquadValid,
+    minAllowedBalance,
+    maxOverdraftLimit,
+    isBudgetNegative,
+    isOverdraftPenalized,
   } = useFantasy();
 
   const [activeSlot, setActiveSlot] = useState<{
@@ -178,6 +184,21 @@ export const TacticalPitchView: React.FC = () => {
         </div>
       )}
 
+      {/* Overdraft Warning Banner */}
+      {isBudgetNegative && (
+        <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-2.5 text-xs text-amber-200">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <span className="font-black uppercase tracking-wider text-amber-300 block">
+              Sold Negativ: {formatCurrency(user.budget)}
+            </span>
+            <span className="text-slate-300 block mt-0.5 leading-relaxed">
+              Poți intra în minus până la maxim 50% din valoarea lotului ({formatCurrency(minAllowedBalance)}). Pentru a primi puncte în clasamentul etapei, revino pe plus înainte de startul oficial al etapei când se salvează echipa pentru LIVE!
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Active Captain Banner (x2 points at final whistle) */}
       <div className="p-2.5 px-3.5 rounded-2xl bg-amber-950/30 border border-amber-500/30 flex items-center justify-between text-xs text-amber-200 shadow-sm">
         <div className="flex items-center gap-2">
@@ -238,48 +259,64 @@ export const TacticalPitchView: React.FC = () => {
                   onClick={() => setSelectedPlayerForModal(player)}
                   className="group relative flex flex-col items-center cursor-pointer transition-transform active:scale-95 hover:scale-105"
                 >
-                  {/* Captaincy Golden Crown Badge */}
-                  {isCaptain && (
-                    <span
-                      title="Căpitan Activ (x2 puncte după fluierul final)"
-                      className="absolute -top-2 -right-1.5 z-20 w-4 h-4 rounded-full bg-amber-400 text-slate-950 font-black text-[9px] flex items-center justify-center shadow-lg ring-1 ring-amber-200"
-                    >
-                      C
-                    </span>
-                  )}
+                  {/* Avatar / Shirt Circle Container with Badges anchored on border */}
+                  <div className="relative z-10 w-10 h-10 sm:w-11 sm:h-11">
+                    <div className="w-full h-full rounded-full p-0.5 bg-gradient-to-b from-white/90 to-slate-800 shadow-xl border-2 border-slate-900/80 overflow-hidden group-hover:scale-105 transition-transform">
+                      <img
+                        src={player.avatar}
+                        alt={player.name}
+                        className="w-full h-full object-cover rounded-full bg-slate-950"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(player.name)}&background=0f172a&color=05df72&bold=true`;
+                        }}
+                      />
+                    </div>
 
-                  {/* Status Indicator */}
-                  {player.status === 'injured' && (
-                    <span className="absolute -top-1 -left-1 z-20 w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-md ring-1 ring-rose-400">
-                      <ShieldAlert className="w-2.5 h-2.5" />
-                    </span>
-                  )}
-                  {player.status === 'suspended' && (
-                    <span className="absolute -top-1 -left-1 z-20 w-4 h-4 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-md ring-1 ring-amber-300">
-                      <ShieldAlert className="w-2.5 h-2.5" />
-                    </span>
-                  )}
+                    {/* Captaincy Golden Crown Badge - anchored right on photo edge */}
+                    {isCaptain && (
+                      <span
+                        title="Căpitan Activ (x2 puncte după fluierul final)"
+                        className="absolute -top-1 -right-1 z-20 w-4 h-4 rounded-full bg-amber-400 text-slate-950 font-black text-[9px] flex items-center justify-center shadow-lg ring-1 ring-amber-200"
+                      >
+                        C
+                      </span>
+                    )}
 
-                  {/* Avatar / Shirt Circle (poza exact deasupra numelui) */}
-                  <div className="relative z-10 w-10 h-10 sm:w-11 sm:h-11 rounded-full p-0.5 bg-gradient-to-b from-white/90 to-slate-800 shadow-xl border-2 border-slate-900/80 overflow-hidden group-hover:scale-105 transition-transform">
-                    <img
-                      src={player.avatar}
-                      alt={player.name}
-                      className="w-full h-full object-cover rounded-full bg-slate-950"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(player.name)}&background=0f172a&color=05df72&bold=true`;
-                      }}
-                    />
+                    {/* Status Indicator */}
+                    {player.status === 'injured' && (
+                      <span className="absolute -top-1 -left-1 z-20 w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-md ring-1 ring-rose-400">
+                        <ShieldAlert className="w-2.5 h-2.5" />
+                      </span>
+                    )}
+                    {player.status === 'suspended' && (
+                      <span className="absolute -top-1 -left-1 z-20 w-4 h-4 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-md ring-1 ring-amber-300">
+                        <ShieldAlert className="w-2.5 h-2.5" />
+                      </span>
+                    )}
+
+                    {/* Quick Captain Selector Button if not captain */}
+                    {!isCaptain && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCaptain(player.id);
+                        }}
+                        className="absolute -top-1 -left-1 w-4 h-4 rounded-full bg-slate-800 border border-amber-400/80 text-amber-300 text-[8px] font-black flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-amber-400 hover:text-slate-950 transition-all shadow z-20"
+                        title="Setează Căpitan (x2)"
+                      >
+                        C
+                      </button>
+                    )}
                   </div>
 
                   {/* Player Name Pill (exact sub poză, fără distanță) */}
                   <div className="-mt-1 px-[5px] pb-[2px] pt-0.5 bg-slate-950/95 backdrop-blur-md rounded-lg border border-slate-700/90 shadow-md text-center max-w-[92px] sm:max-w-[110px] truncate relative z-0">
-                    <span className="text-[15px] font-bold italic text-white block truncate leading-tight tracking-tight px-[3px]">
+                    <span className="text-[15px] font-bold italic uppercase tracking-tight text-white block truncate leading-tight px-[3px]">
                       {player.lastName || player.name}
                     </span>
                   </div>
 
-                  {/* Schimbă Titular (mutat sub nume în locul badge-ului de puncte, puțin mai mare) */}
+                  {/* Schimbă Titular (sub nume) */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -295,20 +332,6 @@ export const TacticalPitchView: React.FC = () => {
                   >
                     <span className="text-sm font-black leading-none select-none">⇄</span>
                   </button>
-
-                  {/* Quick Captain Selector Button if not captain */}
-                  {!isCaptain && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCaptain(player.id);
-                      }}
-                      className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-slate-800 border border-amber-400/80 text-amber-300 text-[9px] font-black flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-amber-400 hover:text-slate-950 transition-all shadow"
-                      title="Setează Căpitan (x2)"
-                    >
-                      C
-                    </button>
-                  )}
                 </div>
               ) : (
                 /* Empty Slot Placeholder (-100p penalty rule) */
@@ -369,39 +392,34 @@ export const TacticalPitchView: React.FC = () => {
                 <div
                   key={player.id}
                   onClick={() => setSelectedPlayerForModal(player)}
-                  className="shrink-0 w-28 p-2 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 transition-all cursor-pointer flex flex-col items-center text-center group"
+                  className="shrink-0 w-32 p-2.5 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 transition-all cursor-pointer flex flex-col items-center text-center group space-y-1.5"
                 >
-                  <div className="relative">
+                  {/* Photo 50% width of card */}
+                  <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-slate-700 shadow-md bg-slate-900 group-hover:scale-105 transition-transform shrink-0">
                     <img
                       src={player.avatar}
                       alt={player.name}
-                      className="w-10 h-10 rounded-full object-cover border border-slate-700 bg-slate-900"
+                      className="w-full h-full object-cover"
                       onError={(e) => {
                         (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(player.name)}&background=0f172a&color=05df72&bold=true`;
                       }}
                     />
                   </div>
 
-                  <span className="text-xs font-bold text-white mt-1.5 truncate w-full">
+                  <span className="text-xs font-bold uppercase tracking-tight text-white truncate w-full">
                     {player.lastName || player.name}
                   </span>
 
-                  {/* Badge poziție sub nume: Portar, Atacant, Mijlocas, Fundas */}
-                  <span className={`mt-0.5 text-[9px] font-bold px-2 py-0.5 rounded-full border ${badge.bg} ${badge.text}`}>
-                    {player.position === 'GK'
-                      ? 'Portar'
-                      : player.position === 'DEF'
-                      ? 'Fundas'
-                      : player.position === 'MID'
-                      ? 'Mijlocas'
-                      : 'Atacant'}
+                  {/* Badge poziție cu nume complet */}
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-md font-extrabold uppercase tracking-wider text-[9px] border ${badge.bg} ${badge.text}`}>
+                    {badge.label}
                   </span>
 
-                  <span className="text-[10px] text-slate-400 truncate w-full mt-0.5">
+                  <span className="text-[10px] text-slate-400 truncate w-full">
                     {club?.shortName}
                   </span>
 
-                  <div className="flex items-center gap-1 mt-1 font-mono text-[10px]">
+                  <div className="flex items-center justify-center gap-1.5 font-mono text-[10px]">
                     <span className="text-amber-400 font-bold">{player.pointsMatchday}p</span>
                     <span className="text-slate-500">·</span>
                     <span className="text-emerald-400">{formatCurrency(player.marketValue)}</span>
