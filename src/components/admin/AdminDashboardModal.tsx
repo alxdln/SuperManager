@@ -24,12 +24,14 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { loadFirestoreCustomPlayers } from '../../lib/firebase';
+import { DatabaseAndApisPanel } from './DatabaseAndApisPanel';
 
 interface AdminDashboardModalProps {
   onClose: () => void;
+  initialTab?: 'addPlayer' | 'managePlayers' | 'leagueSettings' | 'databaseAndApis';
 }
 
-export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({ onClose }) => {
+export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({ onClose, initialTab = 'addPlayer' }) => {
   const {
     players,
     addNewPlayer,
@@ -39,7 +41,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({ onClos
     updateLeagueSettings,
   } = useFantasy();
 
-  const [activeTab, setActiveTab] = useState<'addPlayer' | 'managePlayers' | 'leagueSettings' | 'databaseAndApis'>('addPlayer');
+  const [activeTab, setActiveTab] = useState<'addPlayer' | 'managePlayers' | 'leagueSettings' | 'databaseAndApis'>(initialTab);
   const [firestoreStatus, setFirestoreStatus] = useState<'connected' | 'syncing' | 'synced'>('connected');
   const [testPayloadResult, setTestPayloadResult] = useState<string | null>(null);
 
@@ -158,25 +160,25 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({ onClos
         </div>
 
         {/* Tab Pills */}
-        <div className="flex items-center gap-1 p-1 my-3 bg-slate-800/80 rounded-2xl">
+        <div className="flex items-center gap-1.5 p-1.5 my-3 bg-slate-800/80 rounded-2xl overflow-x-auto scrollbar-none">
           <button
             onClick={() => setActiveTab('addPlayer')}
-            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            className={`shrink-0 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'addPlayer'
-                ? 'bg-emerald-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-emerald-500 text-slate-950 shadow-md font-black'
+                : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
             }`}
           >
             <UserPlus className="w-3.5 h-3.5" />
-            <span>Adaugă Jucător Nou</span>
+            <span>Adaugă Jucător</span>
           </button>
 
           <button
             onClick={() => setActiveTab('managePlayers')}
-            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            className={`shrink-0 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'managePlayers'
-                ? 'bg-emerald-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-emerald-500 text-slate-950 shadow-md font-black'
+                : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
@@ -185,10 +187,10 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({ onClos
 
           <button
             onClick={() => setActiveTab('leagueSettings')}
-            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            className={`shrink-0 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'leagueSettings'
-                ? 'bg-emerald-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-emerald-500 text-slate-950 shadow-md font-black'
+                : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
             }`}
           >
             <Settings className="w-3.5 h-3.5" />
@@ -197,10 +199,10 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({ onClos
 
           <button
             onClick={() => setActiveTab('databaseAndApis')}
-            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            className={`shrink-0 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'databaseAndApis'
-                ? 'bg-emerald-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-emerald-500 text-slate-950 shadow-md font-black ring-2 ring-emerald-400/50'
+                : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30'
             }`}
           >
             <Database className="w-3.5 h-3.5" />
@@ -467,173 +469,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({ onClos
         )}
 
         {/* TAB 4: DATABASE & LIVE APIS (SOFASCORE, FLASHSCORE, OPTA) */}
-        {activeTab === 'databaseAndApis' && (
-          <div className="space-y-4 text-xs">
-            {/* 1. Firebase Firestore Persistent Storage */}
-            <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
-                    <Database className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-extrabold uppercase text-white">
-                      Bază de Date Cloud: Firebase Firestore
-                    </h3>
-                    <span className="text-[10px] text-slate-400">
-                      Stocare persistentă sincronizată în cloud pentru jucători și date de test
-                    </span>
-                  </div>
-                </div>
-
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Conectat Activ
-                </span>
-              </div>
-
-              <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 font-mono text-[11px] text-slate-300 space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Proiect Firebase:</span>
-                  <span className="text-slate-200">bustling-sign-98f9p</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Database ID:</span>
-                  <span className="text-emerald-400 truncate max-w-[280px]">
-                    ai-studio-supermanagerromn-01d29af6-a169-4d70-bc4f-80623db89e6d
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Colecție activă:</span>
-                  <span className="text-amber-400">custom_players</span>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-[11px] text-slate-400">
-                  Toți fotbaliștii adăugați din tab-ul <b>&ldquo;Adaugă Jucător Nou&rdquo;</b> se salvează automat în Firestore.
-                </span>
-
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setFirestoreStatus('syncing');
-                    try {
-                      const res = await loadFirestoreCustomPlayers();
-                      setFirestoreStatus('synced');
-                      setTimeout(() => setFirestoreStatus('connected'), 3000);
-                    } catch (e) {
-                      setFirestoreStatus('connected');
-                    }
-                  }}
-                  className="py-1.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 inline-flex items-center gap-1.5 active:scale-95 transition-all shrink-0"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${firestoreStatus === 'syncing' ? 'animate-spin text-emerald-400' : ''}`} />
-                  <span>{firestoreStatus === 'syncing' ? 'Se sincronizează...' : firestoreStatus === 'synced' ? 'Sincronizat ✓' : 'Sincronizează Acum'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* 2. Research & Documentation: Free Real-Time Football APIs */}
-            <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3.5">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-blue-500/20 text-blue-400">
-                  <Globe className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-extrabold uppercase text-white">
-                    API-uri Reale pentru Date &amp; Acțiuni Live
-                  </h3>
-                  <span className="text-[10px] text-slate-400">
-                    Soluții gratuite evaluate pentru preluarea acțiunilor în timp real din Superliga României
-                  </span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-                {/* Sofascore */}
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-blue-400 text-xs">1. Sofascore API</span>
-                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300">Gratis / RapidAPI</span>
-                  </div>
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
-                    Preluare incidents live, note fotbaliști (1.0 - 10.0), șuturi pe poartă, intervenții portar și statistici detaliate.
-                  </p>
-                  <div className="p-1.5 bg-slate-950 rounded font-mono text-[9px] text-slate-400 truncate">
-                    api.sofascore.com/api/v1/event/&#123;id&#125;/incidents
-                  </div>
-                </div>
-
-                {/* Flashscore */}
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-rose-400 text-xs">2. Flashscore API</span>
-                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300">RapidAPI Free</span>
-                  </div>
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
-                    Cronologie live a meciurilor, cartonașe, goluri, schimbări și comentariu live text minut cu minut.
-                  </p>
-                  <div className="p-1.5 bg-slate-950 rounded font-mono text-[9px] text-slate-400 truncate">
-                    rapidapi.com/flashscore-stream
-                  </div>
-                </div>
-
-                {/* API-Football / Opta */}
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-emerald-400 text-xs">3. API-Football (Opta)</span>
-                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300">100 req/zi Free</span>
-                  </div>
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
-                    Cel mai stabil API pentru Superliga (League ID: 283). Date oficiale complete, cartonașe, goluri, pase și formații.
-                  </p>
-                  <div className="p-1.5 bg-slate-950 rounded font-mono text-[9px] text-slate-400 truncate">
-                    v3.football.api-sports.io/fixtures?league=283
-                  </div>
-                </div>
-              </div>
-
-              {/* Interactive API Tester */}
-              <div className="pt-2 border-t border-slate-800 space-y-2">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <Terminal className="w-3.5 h-3.5 text-emerald-400" />
-                    Tester Simulator Webhook / API Live Superliga
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const sample = {
-                        source: 'API-Football / Sofascore Feed',
-                        league: 'Superliga României 2024/2025',
-                        fixture: 'FCSB vs Rapid București',
-                        status: 'LIVE_MIN_68',
-                        live_events_parsed: [
-                          { min: 42, player: 'Alexandru Mitriță', action: 'SHOT_ON_TARGET', opta_code: 'S_ON', points_awarded: 12 },
-                          { min: 58, player: 'Darius Olaru', action: 'GOAL_PENALTY', opta_code: 'G_PEN', points_awarded: 50 },
-                          { min: 64, player: 'Ștefan Târnovanu', action: 'PENALTY_SAVE', opta_code: 'P_SAVE', points_awarded: 75 },
-                        ],
-                        sync_timestamp: new Date().toISOString(),
-                      };
-                      setTestPayloadResult(JSON.stringify(sample, null, 2));
-                    }}
-                    className="py-1 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] inline-flex items-center gap-1 active:scale-95 transition-all"
-                  >
-                    <Zap className="w-3 h-3 fill-current" />
-                    <span>Testează Răspuns API Live</span>
-                  </button>
-                </div>
-
-                {testPayloadResult && (
-                  <pre className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-[10px] font-mono text-emerald-400 overflow-x-auto leading-tight">
-                    {testPayloadResult}
-                  </pre>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        {activeTab === 'databaseAndApis' && <DatabaseAndApisPanel />}
       </div>
     </div>
   );

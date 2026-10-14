@@ -1487,9 +1487,17 @@ export const INITIAL_FIXTURES: Fixture[] = [
 
 export const INITIAL_LEAGUE_NEWS: LeagueNewsArticle[] = [
   {
+    id: 'news_member_1',
+    title: 'Membru Nou: Andrei Popa a intrat în ligă!',
+    summary: 'Managerul Andrei Popa s-a alăturat ligii cu echipa Dinamo Red Dogs FC.',
+    content: 'Comunitatea se mărește! Un nou manager a intrat în competiție cu un buget complet și este gata să participe la licitațiile etapei curente.',
+    date: 'Acum 10 min',
+    tag: 'ETAPĂ',
+  },
+  {
     id: 'news_1',
     title: 'BOMBA ZILEI: Darius Olaru a semnat! Clauză activată la €7.00M',
-    summary: 'Transfer răsunător încheiat în SuperManager: căpitanul a fost achiziționat după atingerea clauzei minime de transfer instant.',
+    summary: 'Transfer răsunător: căpitanul a fost transferat după atingerea clauzei minime de transfer instant.',
     content: 'Negocierile s-au încheiat spectaculos pe piața de transferuri. Oferta a egalat clauza cerută de vânzător, iar Olaru s-a transferat instant, devenind cel mai scump jucător din ligă.',
     date: 'Azi, 14:20',
     tag: 'CLAUZĂ ACTIVATĂ',
@@ -1500,12 +1508,24 @@ export const INITIAL_LEAGUE_NEWS: LeagueNewsArticle[] = [
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
   },
   {
+    id: 'news_member_2',
+    title: 'Actualizare Ligă: Radu Dumitrescu a părăsit liga',
+    summary: 'Managerul Radu Dumitrescu a părăsit liga. Lotul său a fost eliberat pe piața liberă de transferuri.',
+    content: 'Conform regulamentului, jucătorii rămași fără manager sunt puși în licitație garantată cu preț de bază LPF.',
+    date: 'Azi, 11:30',
+    tag: 'ETAPĂ',
+  },
+  {
     id: 'news_2',
-    title: 'Recalculare Cote Piață: Creșteri masive după Etapa 12!',
-    summary: 'Media sumelor de transfer din toate ligile pe ultima săptămână a stabilit noile cote oficiale ale jucătorilor.',
-    content: 'Conform regulamentului oficial, la încheierea fiecărei etape cotele de piață se actualizează automat pe baza mediei ponderate a tranzacțiilor din ultima săptămână. Daniel Bîrligea (+13%) și Alexandru Mitriță (+5.2%) înregistrează cele mai mari aprecieri.',
-    date: 'Ieri, 23:45',
-    tag: 'COTE PIAȚĂ',
+    title: 'Transfer: Denis Alibec achiziționat pe piața liberă',
+    summary: 'Atacantul Farului Constanța a fost achiziționat de FC Dobrogea pentru 1.200.000 €.',
+    content: 'Transfer finalizat cu succes în fereastra deschisă.',
+    date: 'Azi, 09:15',
+    tag: 'TRANSFER',
+    amount: 1200000,
+    playerName: 'Denis Alibec',
+    buyerName: 'FC Dobrogea',
+    sellerName: 'Superliga României',
   },
   {
     id: 'news_3',

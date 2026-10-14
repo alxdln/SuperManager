@@ -111,26 +111,16 @@ export const TacticalPitchView: React.FC = () => {
           </div>
         </div>
 
-        {/* Squad Matchday KPI */}
+        {/* Squad Size info (Informația despre mărimea lotului rămâne) */}
         <div className="flex items-center gap-2 text-right">
-          <div className="p-2 px-3 rounded-2xl bg-slate-900/90 border border-slate-800">
-            <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Puncte Etapă</span>
-            <div className="flex items-center justify-end gap-1 font-mono font-bold text-amber-400 text-base">
-              <Flame className="w-4 h-4 text-amber-400" />
-              <span>{squadPointsMatchday}</span>
-            </div>
-            {emptySlotsPenalty > 0 && (
-              <span className="text-[9px] font-mono text-rose-400 block -mt-0.5">
-                -{emptySlotsPenalty}p penalizare
+          <div className="p-2 px-3 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center gap-2">
+            <Users className="w-4 h-4 text-emerald-400 shrink-0" />
+            <div className="text-left">
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Mărime Lot</span>
+              <span className="font-mono font-bold text-white text-sm block">
+                {squadCount}/16 jucători
               </span>
-            )}
-          </div>
-
-          <div className="p-2 px-3 rounded-2xl bg-slate-900/90 border border-slate-800">
-            <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Valoare Lot</span>
-            <span className="font-mono font-bold text-emerald-400 text-base block">
-              {formatCurrency(squadTotalValue)}
-            </span>
+            </div>
           </div>
         </div>
       </div>

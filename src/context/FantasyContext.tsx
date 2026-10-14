@@ -18,19 +18,33 @@ import {
   MatchEventType,
 } from '../types/football';
 import { INITIAL_PLAYERS, INITIAL_FIXTURES, INITIAL_LEAGUE_NEWS } from '../data/superligaData';
+import { ALL_16_SUPERLIGA_PLAYERS } from '../data/superligaAll16ClubsPlayers';
 import { FORMATIONS } from '../data/formations';
 import { calculateEventPoints, formatCurrency, formatFullCurrency } from '../utils/scoringEngine';
-import { loadFirestoreCustomPlayers, saveFirestoreCustomPlayer } from '../lib/firebase';
+import {
+  loadFirestoreCustomPlayers,
+  saveFirestoreCustomPlayer,
+  saveFirestoreUserAccount,
+  findFirestoreUser,
+  saveFirestoreLeague,
+  findFirestoreLeagueByCode,
+} from '../lib/firebase';
 
 interface FantasyContextType {
   // User & Auth
   user: UserProfile;
   isAuthenticated: boolean;
-  login: (email: string, pass: string) => void;
+  registerUserAccount: (accountData: { email: string; password?: string; name: string; teamName: string }) => Promise<{ success: boolean; message: string }>;
+  login: (email: string, pass: string) => Promise<{ success: boolean; hasLeague: boolean; message?: string }>;
   loginWithProvider: (provider: 'apple' | 'google') => void;
   logout: () => void;
   updateUserTeamName: (newName: string) => void;
   updateUserPassword: (password: string) => boolean;
+
+  // League Creation & Join
+  createNewLeague: (data: { name: string; startingBudget: number; maxSameClubPlayers: number }) => Promise<{ success: boolean; message: string }>;
+  joinLeagueByCode: (code: string) => Promise<{ success: boolean; message: string }>;
+  addNewsArticle: (article: Omit<LeagueNewsArticle, 'id' | 'date'>) => void;
 
   // Players & Squad
   players: Player[];
@@ -147,15 +161,22 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   });
 
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return localStorage.getItem(`${STORAGE_KEY}_auth`) === 'true';
+  });
 
-  // All Players List
+  // All Players List (All 16 Liga 1 Clubs)
   const [players, setPlayers] = useState<Player[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_players`);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { /* ignore */ }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length >= ALL_16_SUPERLIGA_PLAYERS.length) {
+          return parsed;
+        }
+      } catch (e) { /* ignore */ }
     }
-    return INITIAL_PLAYERS;
+    return ALL_16_SUPERLIGA_PLAYERS;
   });
 
   // Squad State
@@ -626,19 +647,101 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return errors;
   }, [squadCount, gkCount, emptyStarterSlotsCount]);
 
-  // Auth functions
-  const login = (email: string, _pass: string) => {
-    setIsAuthenticated(true);
-    setUser((prev) => ({ ...prev, email }));
-    addNotification({
-      title: 'Autentificare reușită',
-      message: `Bun venit înapoi, ${user.name}!`,
-      type: 'reward',
-    });
+  // Auth & Database Persistence functions
+  const registerUserAccount = async (accountData: {
+    email: string;
+    password?: string;
+    name: string;
+    teamName: string;
+  }): Promise<{ success: boolean; message: string }> => {
+    try {
+      const newUserId = `usr_${Date.now()}`;
+      const defaultAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(accountData.name)}&background=05df72&color=0b0e14&bold=true`;
+      
+      const newProfile: UserProfile = {
+        id: newUserId,
+        name: accountData.name,
+        email: accountData.email,
+        teamName: accountData.teamName || `${accountData.name} FC`,
+        avatar: defaultAvatar,
+        favoriteClubId: 'fcsb',
+        budget: 50000000,
+        fanCoins: 1000,
+        checkinsCount: 0,
+      };
+
+      setUser(newProfile);
+      setIsAuthenticated(true);
+      localStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
+
+      // Save to Firestore and Local Database
+      await saveFirestoreUserAccount({
+        id: newUserId,
+        email: accountData.email,
+        password: accountData.password,
+        name: accountData.name,
+        teamName: accountData.teamName,
+        avatar: defaultAvatar,
+        budget: 50000000,
+        createdAt: new Date().toISOString(),
+      });
+
+      addNotification({
+        title: 'Cont creat cu succes',
+        message: `Bun venit în SuperManager, ${accountData.name}!`,
+        type: 'reward',
+      });
+
+      return { success: true, message: 'Cont creat cu succes!' };
+    } catch (e) {
+      return { success: false, message: 'Eroare la salvarea contului în baza de date.' };
+    }
+  };
+
+  const login = async (email: string, _pass: string): Promise<{ success: boolean; hasLeague: boolean; message?: string }> => {
+    try {
+      const stored = await findFirestoreUser(email);
+      if (stored) {
+        setUser((prev) => ({
+          ...prev,
+          id: stored.id || prev.id,
+          name: stored.name || prev.name,
+          email: stored.email,
+          teamName: stored.teamName || prev.teamName,
+          avatar: stored.avatar || prev.avatar,
+          budget: stored.budget || prev.budget,
+        }));
+        if (stored.leagueCode) {
+          setLeagueSettings((prev) => ({
+            ...prev,
+            leagueCode: stored.leagueCode || prev.leagueCode,
+            leagueName: stored.leagueName || prev.leagueName,
+          }));
+        }
+      } else {
+        setUser((prev) => ({ ...prev, email }));
+      }
+
+      setIsAuthenticated(true);
+      localStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
+
+      addNotification({
+        title: 'Autentificare reușită',
+        message: `Bun venit înapoi!`,
+        type: 'reward',
+      });
+
+      return { success: true, hasLeague: !!stored?.leagueCode };
+    } catch (err) {
+      setIsAuthenticated(true);
+      localStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
+      return { success: true, hasLeague: false };
+    }
   };
 
   const loginWithProvider = (provider: 'apple' | 'google') => {
     setIsAuthenticated(true);
+    localStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
     addNotification({
       title: `Conectat cu ${provider === 'apple' ? 'Apple ID' : 'Google'}`,
       message: 'Te-ai autentificat cu succes în SuperManager.',
@@ -648,6 +751,81 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const logout = () => {
     setIsAuthenticated(false);
+    localStorage.removeItem(`${STORAGE_KEY}_auth`);
+  };
+
+  // League Creation & Join methods
+  const createNewLeague = async (data: {
+    name: string;
+    startingBudget: number;
+    maxSameClubPlayers: number;
+  }): Promise<{ success: boolean; message: string }> => {
+    const code = `SUP-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    const leagueId = `lg_${Date.now()}`;
+
+    setLeagueSettings({
+      leagueName: data.name,
+      leagueCode: code,
+      startingBudget: data.startingBudget,
+      maxSquadSize: 16,
+      allowMemberAuctions: true,
+      transferWindowOpen: true,
+    });
+
+    setUser((prev) => ({
+      ...prev,
+      budget: data.startingBudget,
+    }));
+
+    // Save to Firestore
+    await saveFirestoreLeague({
+      id: leagueId,
+      name: data.name,
+      code,
+      budget: data.startingBudget,
+      maxSameClubPlayers: data.maxSameClubPlayers,
+      creatorId: user.id,
+      creatorName: user.name,
+      createdAt: new Date().toISOString(),
+    });
+
+    // Add News Article in feed
+    addNewsArticle({
+      title: `Ligă Nouă Fondată: ${data.name}!`,
+      summary: `Managerul ${user.name} a fondat liga ${data.name} cu buget de ${formatCurrency(data.startingBudget)} per club.`,
+      content: `O nouă ligă privată a fost creată oficial. Invitați prietenii folosind codul ${code}.`,
+      tag: 'ETAPĂ',
+    });
+
+    return { success: true, message: 'Ligă creată cu succes!' };
+  };
+
+  const joinLeagueByCode = async (code: string): Promise<{ success: boolean; message: string }> => {
+    const found = await findFirestoreLeagueByCode(code);
+    const resolvedName = found ? found.name : `Liga ${code.toUpperCase()}`;
+    const resolvedBudget = found ? found.budget : 50000000;
+
+    setLeagueSettings((prev) => ({
+      ...prev,
+      leagueCode: code.toUpperCase(),
+      leagueName: resolvedName,
+      startingBudget: resolvedBudget,
+    }));
+
+    setUser((prev) => ({
+      ...prev,
+      budget: resolvedBudget,
+    }));
+
+    // Add News Article in feed
+    addNewsArticle({
+      title: `Membru Nou: ${user.name} a intrat în ligă!`,
+      summary: `Managerul ${user.name} (${user.teamName}) s-a alăturat ligii ${resolvedName}!`,
+      content: `Comunitatea crește! Un nou manager a intrat în competiție și este gata de licitații.`,
+      tag: 'ETAPĂ',
+    });
+
+    return { success: true, message: `Te-ai alăturat ligii ${resolvedName}!` };
   };
 
   const updateUserTeamName = (newName: string) => {
@@ -2085,11 +2263,15 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       value={{
         user,
         isAuthenticated,
+        registerUserAccount,
         login,
         loginWithProvider,
         logout,
         updateUserTeamName,
         updateUserPassword,
+        createNewLeague,
+        joinLeagueByCode,
+        addNewsArticle,
         players,
         squad,
         changeFormation,

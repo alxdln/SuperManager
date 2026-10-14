@@ -1,165 +1,160 @@
-# SuperManager: Engine Demo Live, Reguli Financiare Overdraft & Integrare Cloud
+# SuperManager România — Arhitectură Cloud Firestore, Conexiuni Sofascore/Opta & Noul Modul "Club"
 
-Plan de implementare pentru actualizarea modului LIVE cu meci demonstrativ de 3 minute, sistem financiar de overdraft limitat la -50% din valoarea lotului, optimizări ergonomice de layout cu imagini generoase de 50%, redenumire navigație footer și strategie de date persistente și API-uri sportive externe.
+Plan complet de modernizare și sincronizare a jocului SuperManager România cu baza de date Firebase Firestore, eliminarea duplicărilor de date din interfață, integrarea fluxului de autentificare/onboarding și conectarea exclusivă a API-urilor Sofascore și Opta la motorul de scoring.
 
-## User Review & Critical Decisions
+---
+
+## Decizii Confirmate de Utilizator
 
 > [!IMPORTANT]
-> Deciziile confirmate de utilizator în etapa de clarificare:
-> - **Backend & Bază de date:** Integrare Firebase Firestore cu sincronizare cloud pentru salvarea jucătorilor noi și testare.
-> - **Mod Meci Demo (LIVE):** Cronometru accelerat de 3 minute (180s) cu generare continuă de evenimente live în timp real cu jucătorii din lotul echipei.
-> - **Regulă Penalizare Buget Negativ:** Dacă echipa are balanță negativă la debutul etapei, fotbaliștii afișează punctele și fazele individual în mod normal, însă punctajul total al echipei în clasamentul live și general devine 0.
+> - **Canal unic de administrare**: Se elimină butoanele rapide din Header și din Setări. Accesul la Panoul de Bază de Date & API-uri se face **exclusiv prin Metoda 3: Creator & Commissioner OS** securizat cu PIN (`1923`).
+> - **API-uri Live**: Se păstrează strict **Sofascore** și **Opta (API-Football)** (versiunile gratuite). **Flashscore este eliminat complet**. Toate evenimentele preluate din aceste două API-uri sunt mapate pe **Scoring Engine-ul nostru existent** (nu se alterează regulamentul de punctaj al jocului).
+> - **Bază de date Jucători Liga 1**: Se populează baza de date Firestore cu toate cele 16 cluburi din Superliga României (FCSB, CFR Cluj, Rapid, Universitatea Craiova, Dinamo, Farul, Oțelul, Sepsi, U Cluj, Petrolul, Hermannstadt, UTA Arad, Poli Iași, Botoșani, Buzău, Slobozia), fiecare fotbalist având ID unic intern ascuns, nume, prenume, club, poziție, poză și stemă oficială.
+> - **Autentificare obligatorie pe dispozitiv nou**: Dacă utilizatorul deschide jocul pe un dispozitiv neautentificat, este întâmpinat obligatoriu de ecranul de Login / Register (Email/Parolă, Google, Apple), datele salvându-se direct în Firestore (`users` collection).
+> - **Onboarding & Creare Ligă**: După înregistrare, utilizatorul trece printr-un ghid dedicat: Creare Ligă Privată (buget echipă, limită fotbaliști per club, nume ligă) sau Alăturare via Cod / Link de invitație.
+> - **Noul Tab "Club" în Footer (Landing Page)**: 
+>   - Antet sus: Nume club, Poza profil manager, Valoare totală lot, Număr jucători în lot.
+>   - Conținut principal: News feed minimalist (transferuri recente, intrări/ieșiri membri în ligă).
+> - **Optimizare Tab "Echipa"**: Se elimină duplicările de date (valoarea lotului și punctele de etapă se mută exclusiv la „Club”; la „Echipa” rămân doar contorul mărimii lotului, selectorul de formație tactică și terenul interactiv).
 
 ---
 
-## 1. Overview & Core Concept
-
-1. **Flexibilitate Layout & Zero Truncating:**
-   - Eliminarea claselor rigide `overflow-hidden` din carduri, pastile și containere de conținut.
-   - Utilizarea claselor `flex-wrap items-center justify-center` pentru alinierea perfectă a elementelor atât vertical cât și orizontal atunci când ecranul este compact.
-2. **Showcase Avatare 50% în Previzualizări:**
-   - Atât în cardurile de pe bancă/listă din ecranul Echipă, cât și în cardurile de pe Piața de Transferuri, avatarul jucătorului va ocupa 50% din lățimea containerului preview, creând un impact vizual superior de cartonaș colecționabil.
-3. **Footer Navigație Actualizat:**
-   - Tab-ul `Piață` devine oficial `TRANSFERURI`.
-   - Tab-ul `Predictor` devine oficial `PREDICȚII`.
-4. **Mecanism Financiar Avansat de Overdraft (Credit de Transferuri):**
-   - Managerul poate intra în minus cu bugetul până la o limită strictă de **-50% din valoarea totală a lotului său** (ex: la un lot de 10.000.000 €, bugetul minim permis este -5.000.000 €).
-   - La încercarea de plasare a unei oferte peste această limită sau când fondurile disponibile sunt depășite, se declanșează un pop-up de avertizare (*Warning Pop-up*), explicând marja permisă.
-   - **Regulă de Etapă:** Dacă la startul meciurilor managerul este pe minus, în profilul jucătorilor acțiunile și punctele se văd normal, dar punctajul total al echipei în clasamentul general este blocat la 0 puncte.
-5. **Mod „Meci Demo” în secțiunea LIVE (3 minute):**
-   - Buton dedicat permanent: **„MECI DEMO (3 MIN)”** cu posibilitate de restart oricând.
-   - Simulare fluidă de 180 secunde (3 minute reale = 90 minute de meci).
-   - Folosește jucătorii titulari din echipa ta, generând faze diverse, realiste, cu scor strâns (1-3 goluri max) și actualizare în timp real a punctajelor.
-6. **Strategie Bază de Date & Evaluare API Fotbal:**
-   - Conectare Firestore pentru salvarea jucătorilor personalizați și configurărilor de test.
-   - Raport detaliat asupra API-urilor Sofascore, Flashscore, OPTA și opțiunilor gratuite (API-Football / API-Sports, FootballData.io).
-
----
-
-## 2. User Experience & Visual Design
-
-### 2.1. Preview Card-uri Jucători cu Avatar 50% & Flex-Wrap
-- Cardul de previzualizare afișează poza fotbalistului centrată, ocupând 50% din lățimea cardului (`w-1/2 aspect-square mx-auto rounded-2xl object-cover shadow-lg border-2 border-slate-700`).
-- Textul și pastilele de informații (poziție completă, club, cotă) se așază dedesubt cu `flex-wrap items-center justify-center text-center`, fără să fie tăiate de `overflow: hidden`.
+## 1. Roadmap & Flux Utilizator (De la primul start la Dashboard)
 
 ```
-┌──────────────────────────────────────────────┐
-│  👤 Listat de: Superliga                     │
-├──────────────────────────────────────────────┤
-│                                              │
-│             ┌──────────────────┐             │
-│             │                  │             │
-│             │   POZĂ JUCĂTOR   │  <- 50% W   │
-│             │     (AVATAR)     │             │
-│             │                  │             │
-│             └──────────────────┘             │
-│                                              │
-│          [ FUNDAȘ ]  ·  FCSB                 │
-│          DARIUS OLARU (CĂPITAN)              │
-│        Cotă: 6.500.000 € · 84 pts            │
-│                                              │
-│   ┌────────────────────┐  ┌──────────────┐   │
-│   │ € 1.500.000        │  │ FĂ O OFERTĂ  │   │
-│   └────────────────────┘  └──────────────┘   │
-└──────────────────────────────────────────────┘
-```
-
-### 2.2. Modal Pop-up Avertizare Buget / Overdraft
-- Titlu: **„Limită Fonduri Depășită”**
-- Conținut:
-  - Buget curent și valoarea lotului.
-  - Limita maximă permisă de descoperire de cont (-50% din valoarea lotului).
-  - Suma necesară pentru a putea finaliza transferul.
-  - Avertisment clar: *„Trebuie să revii pe plus înainte de startul etapei pentru a acumula puncte în clasament!”*
-  - Buton de confirmare: `AM ÎNȚELES`.
-
-### 2.3. Interfața Meciului Demo (LIVE)
-- Banner superior în tab-ul LIVE:
-  - Buton verde neon: `▶ PORNEȘTE MECI DEMO (3 MIN)` / `🔄 REPORNEȘTE MECI DEMO`.
-  - Cronometru dublu: Timp meci (`0' -> 90'`) și Cronometru invers real (`03:00 -> 00:00`).
-  - Bară de progres live și feed de evenimente în timp real generat pentru jucătorii din echipa utilizatorului.
-
----
-
-## 3. Key Product Decisions & Trade-Offs
-
-### 3.1. Calculul Overdraft-ului Financiar
-- **Formula:** `valoareLot = suma(cotaPiata(jucator))` pentru toți cei 11+ jucători din lot.
-- **Limita de credit:** `bugetMinim = -0.5 * valoareLot`.
-- **Exemplu:** Dacă lotul valorează 12.000.000 €, bugetul poate scădea până la -6.000.000 €.
-- **Stare la salvare / debut etapă:** Dacă `buget < 0`, se marchează starea `isOverdraftPenalized = true`. Jucătorii își primesc punctele de meci în mod normal pe ecranele lor, dar scorul total al echipei pe etapă din clasamente este setat la `0`.
-
-### 3.2. Evaluare API-uri Fotbal: Sofascore, Flashscore, OPTA vs Opțiuni Gratuite
-
-| Furnizor | Tip Acces | Date în Timp Real / Evenimente | Costuri & Limite | Compatibilitate Superliga |
-| :--- | :--- | :--- | :--- | :--- |
-| **Sofascore** | Neoficial (RapidAPI / Scraper) | Evenimente live detaliate (pase, șuturi, ratings, heatmaps) | Plan Free limitat (~50 req/lună), plătit între $15-$90/lună | Excelentă (acoperă Superliga României meci de meci) |
-| **Flashscore** | Neoficial (Scraping / Parse.bot) | Scoruri live, cronologie goluri/cartonașe | Fără API oficial deschis; riscuri de blocare IP la scraping | Bună pentru scoruri; lipsesc evenimentele granulare (recuperări, dueluri) |
-| **OPTA (Stats Perform)** | Oficial Enterprise B2B | Cele mai precise date xG, evenimente pe secunde, date calitative | Foarte scump (de la €250-€1500+/lună prin contract) | Standardul industriei, dar nefezabil pentru prototip gratuit |
-| **API-Football (API-Sports)** | Oficial Freemium | Scoruri live, statistici meci, evenimente la 15 secunde | **Gratuit: 100 request-uri/zi**, toate endpoint-urile deschise | **Recomandat:** Acoperă Superliga României complet cu ID ligă și evenimente live |
-| **Football-Data.org** | Oficial Freemium | Rezultate, clasamente, loturi | Gratuit: 10 req/min | Nu acoperă acțiuni granulare din Superliga României în planul free |
-
-**Recomandare arhitecturală:**
-- Pentru integrarea în viitor a datelor reale din Superliga, **API-Football (API-Sports)** este cea mai stabilă opțiune gratuită ce oferă cheie API fără card de credit și actualizări la 15 secunde pentru evenimente live.
-
----
-
-## 4. Technical Architecture & Component Flow
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                          SUPERMANAGER CLIENT                           │
-├────────────────────────────────────────────────────────────────────────┤
-│                                                                        │
-│  ┌────────────────────┐    ┌────────────────────────────────────────┐  │
-│  │   TacticalPitch    │    │           TransferMarketView           │  │
-│  │ (Avatare mari 50%) │    │ (Avatare 50%, Wrap, Overdraft Pop-up)  │  │
-│  └─────────┬──────────┘    └───────────────────┬────────────────────┘  │
-│            │                                   │                       │
-│            ▼                                   ▼                       │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                      FantasyContext Engine                       │  │
-│  │  - Overdraft limit check: budget >= -(squadValue * 0.5)          │  │
-│  │  - Overdraft Warning Modal State                                 │  │
-│  │  - Matchday Negative Balance Penalty (Team pts = 0 in standings) │  │
-│  │  - Demo Match 3-min state (interval, events, live ticks)         │  │
-│  │  - Firebase Firestore Sync for custom players & testing          │  │
-│  └─────────────────────────────────┬────────────────────────────────┘  │
-│                                    │                                   │
-│            ┌───────────────────────┴───────────────────────┐           │
-│            ▼                                               ▼           │
-│  ┌───────────────────────────────┐     ┌────────────────────────────┐  │
-│  │        LiveMatchdayView       │     │    Bottom Navigation Bar   │  │
-│  │ - Buton "Meci Demo (3 Min)"   │     │ - ECHIPA                   │  │
-│  │ - 180s live real-time engine  │     │ - MECI                     │  │
-│  │ - Diverse realistic actions   │     │ - TRANSFERURI              │  │
-│  └───────────────────────────────┘     │ - CLASAMENT                │  │
-│                                        │ - PREDICȚII                │  │
-│                                        └────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1. PORNIRE APLICAȚIE PE DISPOZITIV NOU                                       │
+│    Verificare sesiune activă Firestore Auth / Local Storage Tokens         │
+│    └─► Neautentificat? ──► ECRAN AUTENTIFICARE & ÎNREGISTRARE OBLIGATORIE   │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2. FLUX ONBOARDING: LIGĂ PRIVATĂ SAU PUBLICĂ                                │
+│    Utilizatorul alege:                                                      │
+│    ├─ A) Creează o Ligă nouă (Nume virtual, Buget inițial, Max jucători/club)│
+│    └─ B) Introdu Cod de Invitație / Deschide Link (ex: SUPER-RAPID-2025)   │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3. INVITAȚIE PRIETENI (SHARE MODAL)                                         │
+│    Generare link direct de alăturare și cod alfanumeric copiat cu 1-click   │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4. LANDING PAGE PE DASHBOARD: TABUL "CLUB"                                   │
+│    ┌──────────────────────────────────────────────────────────────────┐     │
+│    │ Antet Club: Nume Echipă │ Poză Profil │ Valoare Lot │ Nr. Jucători│     │
+│    ├──────────────────────────────────────────────────────────────────┤     │
+│    │ News Feed Minimalist:                                            │     │
+│    │  • Transferuri confirmate în ligă                                │     │
+│    │  • Notificări noi membri / părăsire ligă                         │     │
+│    │  • Anunțuri de commissioner                                      │     │
+│    └──────────────────────────────────────────────────────────────────┘     │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 5. Implementation Steps
+## 2. Arhitectura de Date & Colecții Firestore
 
-1. **Stilizare Globală & Eliminare `overflow-hidden`:**
-   - Înlocuirea `overflow-hidden` din cardurile de jucător și containerele de conținut cu `flex-wrap items-center justify-center`.
-   - Asigurarea centrării orizontale și verticale în toate cazurile de wrap pe ecrane compacte.
-2. **Design Avatare 50%:**
-   - În `TacticalPitchView` (secțiunea jucătorilor de rezervă) și în `TransferMarketView` (cardurile de vânzare/cumpărare), imaginea jucătorului va fi mărită la 50% din lățimea cardului cu formatare proeminentă.
-3. **Redenumire Tab-uri Footer:**
-   - Schimbat în `MobileShell.tsx`:
-     - `Piață` -> `TRANSFERURI`
-     - `Predictor` -> `PREDICȚII`
-4. **Logică Financiară Overdraft (-50% din valoarea lotului):**
-   - Calcul dinamic: `squadMarketValue` și `maxAllowedOverdraft = squadMarketValue * 0.5`.
-   - Modal Pop-up `OverdraftWarningModal` declanșat la încercarea de achiziție când fondurile depășesc limita.
-   - Punctaj individual vizibil normal în meci, dar penalizare aplicată scorului echipei în clasament dacă balanța este negativă la startul etapei.
-5. **Modul „Meci Demo” de 3 minute:**
-   - State de simulare în `FantasyContext`: durată 180 secunde, pas de 2 secunde per minut de joc.
-   - Folosește jucătorii din primul 11 al utilizatorului și distribuie evenimente variate (pase, deposedări, șuturi, parade, faulturi, 1-2 goluri).
-   - Buton dedicat în `LiveMatchdayView` cu status live și posibilitate de reinițializare oricând.
-6. **Integrare Firebase Firestore & Panou Date:**
-   - Inițializare Firebase Firestore conform cerințelor din `firebase-integration-rpc`.
-   - Adăugare formular de adăugare/editare jucători de test salvate direct în colecția Firestore `custom_players`.
+### Structură Firestore (`ai-studio-supermanagerromn-01d29af6-a169-4d70-bc4f-80623db89e6d`)
+
+1. **`users/{userId}`**:
+   - `id`: string (Firebase Auth UID)
+   - `email`: string
+   - `name`: string
+   - `teamName`: string (Numele clubului virtual)
+   - `avatar`: string URL
+   - `budget`: number (€)
+   - `leagueId`: string
+   - `squad`: array cu IDs jucători și formație
+   - `createdAt`: timestamp
+
+2. **`leagues/{leagueId}`**:
+   - `id`: string (ex: `liga-bucuresti-2025`)
+   - `name`: string
+   - `creatorUserId`: string
+   - `inviteCode`: string (6 caractere alfanumerice unice)
+   - `startingBudget`: number (€)
+   - `maxClubPlayers`: number (ex: max 3 de la FCSB per lot)
+   - `members`: array cu user IDs
+   - `activityFeed`: array de evenimente (transferuri, alăturări)
+
+3. **`players/{playerId}`**:
+   - `id`: string UUID intern (nevizibil în frontend)
+   - `firstName`: string (ex: "Alexandru")
+   - `lastName`: string (ex: "Mitriță")
+   - `clubId`: string (ex: "ucraiova")
+   - `clubName`: string ("Universitatea Craiova")
+   - `clubBadge`: string URL
+   - `position`: "GK" | "DEF" | "MID" | "FWD"
+   - `marketValue`: number
+   - `photo`: string URL
+   - `status`: "active" | "injured" | "suspended"
+
+---
+
+## 3. Conexiune Live Sofascore & Opta (API-Football) cu Scoring Engine
+
+Flashscore se elimină complet din documentație, teste și cod. Se configurează cele 2 surse oficiale gratuite:
+
+```
+┌─────────────────────────────────┐       ┌─────────────────────────────────┐
+│         SOFASCORE API           │       │       OPTA / API-FOOTBALL       │
+│  • Preluare incidents live      │       │  • Superliga Fixtures (ID 283)  │
+│  • Note oficiale (1.0 - 10.0)   │       │  • Meciuri viitoare programate  │
+│  • Intervenții portari, șuturi  │       │  • Cartonașe, goluri, pase      │
+└────────────────┬────────────────┘       └────────────────┬────────────────┘
+                 │                                         │
+                 └────────────────────┬────────────────────┘
+                                      ▼
+             ┌─────────────────────────────────────────────────┐
+             │       ADAPTOR TRANSPUNERE EVENIMENTE            │
+             │   Transformă evenimentele brute externe în      │
+             │   codurile noastre: 'goal', 'assist', 'save',   │
+             │   'shot_on_target', 'yellow_card', 'clean_sheet'│
+             └────────────────────────┬────────────────────────┘
+                                      ▼
+             ┌─────────────────────────────────────────────────┐
+             │         SCORING ENGINE SUPERMANAGER             │
+             │  Calculează punctajul oficial al fotbalistului  │
+             │  conform grilei noastre stabilite!              │
+             └─────────────────────────────────────────────────┘
+```
+
+---
+
+## 4. Modificări de Interfață & Componente
+
+1. **Curățare Header & MobileShell**:
+   - Se elimină butonul `ADMIN / DB` din Header.
+   - În modalul de Setări se elimină cardul/tabul direct de Bază de Date.
+   - Accesul la Panoul de Bază de Date și API-uri rămâne exclusiv în **Creator OS Dashboard** (securizat cu PIN 1923).
+2. **Navigație Footer Actualizată**:
+   - Tab 1: **Club** (Landing page cu profil manager, valoare lot, nr. jucători, news feed transferuri).
+   - Tab 2: **Echipa** (Tactical pitch, selectare 11 de start, selector formație; se elimină valoarea lotului și punctele de etapă care sunt deja la Club).
+   - Tab 3: **Meci** (Live match tracker cu simulare demo și evenimente).
+   - Tab 4: **Transferuri** (Piața transferurilor cu regulă de overdraft -50%).
+   - Tab 5: **Clasament** / **Predicții**.
+3. **Ecran Autentificare & Onboarding Ligă**:
+   - Modal/Ecran complet la pornire când utilizatorul nu este logat.
+   - Ecran pas-cu-pas pentru crearea sau introducerea codului de ligă.
+   - Buton de copiere link / cod invitație pentru prieteni.
+4. **Populare Bază de Date**:
+   - Generator complet pentru toate cele 16 cluburi din Liga 1 (FCSB, CFR Cluj, Rapid, Univ. Craiova, Farul, Dinamo, Oțelul Galați, U Cluj, Sepsi OSK, Petrolul, Hermannstadt, UTA Arad, Poli Iași, FC Botoșani, Gloria Buzău, Unirea Slobozia).
+
+---
+
+## 5. Etape de Verificare
+
+- [ ] Verificare pornire aplicație în stare neautentificată (afișare ecran Login/Register).
+- [ ] Testare înregistrare utilizator nou și salvare profil în Firestore.
+- [ ] Testare creare ligă cu parametri personalizați și alăturare via cod de invitație.
+- [ ] Verificare tab „Club” ca pagină principală cu valoare lot, număr jucători și news feed transferuri.
+- [ ] Verificare ecran „Echipa” (absența duplicatelor de puncte/valoare, prezența selectorului de formație și mărimii lotului).
+- [ ] Verificare acces Admin & Bază de Date: accesibil **strict** prin Creator OS (PIN 1923), absent din header.
+- [ ] Verificare test API Sofascore & Opta cu transpunere directă în puncte conform Scoring Engine.
+- [ ] Rulare `npm run lint` și `compile_applet`.

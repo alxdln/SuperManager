@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
 import { useFantasy } from '../../context/FantasyContext';
 import { TacticalPitchView } from '../squad/TacticalPitchView';
+import { ClubDashboardView } from '../club/ClubDashboardView';
 import { LiveMatchdayView } from '../live/LiveMatchdayView';
 import { TransferMarketView } from '../market/TransferMarketView';
 import { LeaderboardView } from '../leaderboard/LeaderboardView';
 import { SuperPredictorAndRewardsView } from '../rewards/SuperPredictorAndRewardsView';
 import { CreatorDashboardView } from '../creator/CreatorDashboardView';
+import { GameAuthAndOnboardingFlow } from '../auth/GameAuthAndOnboardingFlow';
 import { NotificationsModal } from './NotificationsModal';
 import { AuthAndSettingsModal } from '../auth/AuthAndSettingsModal';
+import { AdminDashboardModal } from '../admin/AdminDashboardModal';
 import { formatCurrency } from '../../utils/scoringEngine';
 import {
   Shield,
+  Users,
   Flame,
   Store,
   Trophy,
@@ -23,16 +27,24 @@ import {
   Battery,
   Award,
   Coins,
+  Database,
 } from 'lucide-react';
 
 export const MobileShell: React.FC = () => {
-  const { user, unreadNotificationsCount, isLiveMatchWindow, squadPointsMatchday } = useFantasy();
+  const { user, isAuthenticated, unreadNotificationsCount, isLiveMatchWindow, squadPointsMatchday } = useFantasy();
 
-  const [activeTab, setActiveTab] = useState<'squad' | 'live' | 'market' | 'leaderboard' | 'hub'>('squad');
+  const [activeTab, setActiveTab] = useState<'club' | 'squad' | 'live' | 'market' | 'leaderboard' | 'hub'>('club');
   const [isIPhoneFrame, setIsIPhoneFrame] = useState(true);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAdminDashboard, setShowAdminDashboard] = useState(false);
+  const [adminInitialTab, setAdminInitialTab] = useState<'addPlayer' | 'managePlayers' | 'leagueSettings' | 'databaseAndApis'>('databaseAndApis');
   const [isCreatorMode, setIsCreatorMode] = useState(false);
+
+  // If user is not logged in or has not finished onboarding
+  if (!isAuthenticated) {
+    return <GameAuthAndOnboardingFlow onComplete={() => setActiveTab('club')} />;
+  }
 
   if (isCreatorMode) {
     return <CreatorDashboardView onExit={() => setIsCreatorMode(false)} />;
@@ -128,7 +140,7 @@ export const MobileShell: React.FC = () => {
           </div>
 
           {/* Quick budget & Notification actions */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {/* Quick budget chip */}
             <div
               onClick={() => setActiveTab('market')}
@@ -164,6 +176,7 @@ export const MobileShell: React.FC = () => {
 
         {/* Scrollable Main Content Body */}
         <main className={`flex-1 overflow-y-auto px-3.5 py-4 min-h-0 overscroll-contain ${!isIPhoneFrame ? 'pb-24 sm:pb-28' : ''}`}>
+          {activeTab === 'club' && <ClubDashboardView />}
           {activeTab === 'squad' && <TacticalPitchView />}
           {activeTab === 'live' && <LiveMatchdayView />}
           {activeTab === 'market' && <TransferMarketView />}
@@ -181,18 +194,29 @@ export const MobileShell: React.FC = () => {
         >
           <div className={!isIPhoneFrame ? 'max-w-xl mx-auto px-2 py-1 pb-2' : ''}>
             <div className="grid grid-cols-5 items-center">
-              {/* Tab 1: Squad */}
+              {/* Tab 1: Club (Landing Page / Dashboard) */}
+              <button
+                onClick={() => setActiveTab('club')}
+                className={`flex flex-col items-center justify-center py-1 transition-all ${
+                  activeTab === 'club' ? 'text-emerald-400 scale-105' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Shield className={`w-5 h-5 ${activeTab === 'club' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-center mt-1">Club</span>
+              </button>
+
+              {/* Tab 2: Echipa */}
               <button
                 onClick={() => setActiveTab('squad')}
                 className={`flex flex-col items-center justify-center py-1 transition-all ${
                   activeTab === 'squad' ? 'text-emerald-400 scale-105' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <Shield className={`w-5 h-5 ${activeTab === 'squad' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+                <Users className={`w-5 h-5 ${activeTab === 'squad' ? 'stroke-[2.5]' : 'stroke-2'}`} />
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-center mt-1">Echipa</span>
               </button>
 
-              {/* Tab 2: Meci (doar cu badge-ul de sus care pulsează) */}
+              {/* Tab 3: Meci (cu LIVE badge) */}
               <button
                 onClick={() => setActiveTab('live')}
                 className={`flex flex-col items-center justify-center py-1 transition-all relative ${
@@ -208,7 +232,7 @@ export const MobileShell: React.FC = () => {
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-center mt-1">Meci</span>
               </button>
 
-              {/* Tab 3: Market / Transferuri */}
+              {/* Tab 4: Transferuri */}
               <button
                 onClick={() => setActiveTab('market')}
                 className={`flex flex-col items-center justify-center py-1 transition-all ${
@@ -219,7 +243,7 @@ export const MobileShell: React.FC = () => {
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-center mt-1">Transferuri</span>
               </button>
 
-              {/* Tab 4: Leaderboard */}
+              {/* Tab 5: Clasament */}
               <button
                 onClick={() => setActiveTab('leaderboard')}
                 className={`flex flex-col items-center justify-center py-1 transition-all ${
@@ -228,17 +252,6 @@ export const MobileShell: React.FC = () => {
               >
                 <Trophy className={`w-5 h-5 ${activeTab === 'leaderboard' ? 'stroke-[2.5]' : 'stroke-2'}`} />
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-center mt-1">Clasament</span>
-              </button>
-
-              {/* Tab 5: Predictor / Predicții */}
-              <button
-                onClick={() => setActiveTab('hub')}
-                className={`flex flex-col items-center justify-center py-1 transition-all ${
-                  activeTab === 'hub' ? 'text-emerald-400 scale-105' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Coins className={`w-5 h-5 ${activeTab === 'hub' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-center mt-1">Predicții</span>
               </button>
             </div>
 
@@ -262,6 +275,19 @@ export const MobileShell: React.FC = () => {
               setShowSettings(false);
               setIsCreatorMode(true);
             }}
+            onOpenAdminDashboard={(tab) => {
+              setShowSettings(false);
+              setAdminInitialTab(tab || 'databaseAndApis');
+              setShowAdminDashboard(true);
+            }}
+          />
+        )}
+
+        {/* Admin Dashboard Modal (Bază de Date & API-uri, Jucători, Reguli Ligă) */}
+        {showAdminDashboard && (
+          <AdminDashboardModal
+            initialTab={adminInitialTab}
+            onClose={() => setShowAdminDashboard(false)}
           />
         )}
       </div>

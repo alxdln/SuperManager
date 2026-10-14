@@ -9,6 +9,31 @@ service cloud.firestore {
       allow read: if true;
     }
 
+    // User accounts and authentication credentials
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Leagues and league configurations
+    match /leagues/{leagueId} {
+      allow read, write: if true;
+    }
+
+    // League members and squad links
+    match /league_members/{memberId} {
+      allow read, write: if true;
+    }
+
+    // League news feed (transfers, joined/left members)
+    match /league_news/{newsId} {
+      allow read, write: if true;
+    }
+
+    // Superliga all players and squads
+    match /all_players/{playerId} {
+      allow read, write: if true;
+    }
+
     // Custom players for testing and squad additions
     match /custom_players/{playerId} {
       allow read, write: if true;

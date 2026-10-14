@@ -23,6 +23,7 @@ import {
   Sliders,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { DatabaseAndApisPanel } from '../admin/DatabaseAndApisPanel';
 
 interface CreatorDashboardViewProps {
   onExit: () => void;
@@ -39,7 +40,7 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({ onEx
     unifiedMarketItems,
   } = useFantasy();
 
-  const [activeTab, setActiveTab] = useState<'addPlayer' | 'managePlayers' | 'marketEngine'>('addPlayer');
+  const [activeTab, setActiveTab] = useState<'addPlayer' | 'managePlayers' | 'marketEngine' | 'databaseAndApis'>('addPlayer');
 
   // Form states for adding new player
   const [firstName, setFirstName] = useState('');
@@ -184,22 +185,22 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({ onEx
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-2xl text-xs font-bold">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-2xl text-xs font-bold overflow-x-auto scrollbar-none">
           <button
             onClick={() => setActiveTab('addPlayer')}
-            className={`flex-1 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            className={`shrink-0 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'addPlayer'
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Adaugă Fotbalist Nou</span>
+            <span>Adaugă Fotbalist</span>
           </button>
 
           <button
             onClick={() => setActiveTab('managePlayers')}
-            className={`flex-1 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            className={`shrink-0 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'managePlayers'
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
                 : 'text-slate-400 hover:text-white'
@@ -211,14 +212,26 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({ onEx
 
           <button
             onClick={() => setActiveTab('marketEngine')}
-            className={`flex-1 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            className={`shrink-0 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'marketEngine'
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
             <TrendingUp className="w-3.5 h-3.5" />
-            <span>Motor Cote Transfermarkt</span>
+            <span>Motor Cote</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('databaseAndApis')}
+            className={`shrink-0 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'databaseAndApis'
+                ? 'bg-emerald-500 text-slate-950 font-black shadow-lg shadow-emerald-500/30'
+                : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30'
+            }`}
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span>Bază de Date &amp; API-uri</span>
           </button>
         </div>
 
@@ -499,6 +512,13 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({ onEx
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* TAB 4: DATABASE & APIS */}
+        {activeTab === 'databaseAndApis' && (
+          <div className="p-5 bg-slate-900 border border-slate-800 rounded-3xl shadow-xl">
+            <DatabaseAndApisPanel />
           </div>
         )}
       </main>

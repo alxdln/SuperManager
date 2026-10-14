@@ -15,16 +15,19 @@ import {
   KeyRound,
   ShieldAlert,
   ArrowRight,
+  Database,
 } from 'lucide-react';
 
 interface AuthAndSettingsModalProps {
   onClose: () => void;
   onOpenCreatorMode?: () => void;
+  onOpenAdminDashboard?: (tab?: 'addPlayer' | 'managePlayers' | 'leagueSettings' | 'databaseAndApis') => void;
 }
 
 export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
   onClose,
   onOpenCreatorMode,
+  onOpenAdminDashboard,
 }) => {
   const {
     user,
@@ -135,7 +138,7 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
         </div>
 
         {/* Tab pills */}
-        <div className="flex items-center gap-1 p-1 bg-slate-800 rounded-2xl text-[11px] font-bold overflow-x-auto">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-800 rounded-2xl text-[11px] font-bold overflow-x-auto scrollbar-none">
           <button
             onClick={() => setActiveTab('profile')}
             className={`py-1.5 px-2.5 rounded-xl transition-all shrink-0 ${
@@ -236,6 +239,28 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
                 Gestionează regulile de transfer și parametrii financiari ai ligii tale private.
               </p>
             </div>
+
+            {onOpenAdminDashboard && (
+              <div className="p-3 bg-slate-950/80 border border-emerald-500/30 rounded-2xl flex items-center justify-between gap-3 shadow-inner">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 shrink-0">
+                    <Database className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-white block">Panou Bază de Date &amp; API-uri</span>
+                    <span className="text-[10px] text-slate-400 block">Sincronizare cloud Firestore &amp; teste API Superliga</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onOpenAdminDashboard('databaseAndApis')}
+                  className="py-1.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shrink-0 transition-all flex items-center gap-1 shadow-md shadow-emerald-500/20 active:scale-95"
+                >
+                  <span>Deschide</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
 
             <div>
               <label className="text-slate-300 font-semibold block mb-1">Numele Ligii</label>
