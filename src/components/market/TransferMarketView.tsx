@@ -151,10 +151,10 @@ export const TransferMarketView: React.FC = () => {
     const player = players.find((p) => p.id === item.playerId);
     const resultingBudget = user.budget - offerAmount;
 
-    // 1. Check max 50% overdraft limit:
+    // 1. Check max 30% overdraft limit:
     if (resultingBudget < minAllowedBalance) {
       setOverdraftBlockMessage(
-        `Nu poți plasa această ofertă de ${formatCurrency(offerAmount)}!\n\nValoarea lotului tău este de ${formatCurrency(squadTotalValue)}, ceea ce îți permite un sold negativ de maximum 50% (${formatCurrency(minAllowedBalance)}).\n\nCu această ofertă, soldul tău ar ajunge la ${formatCurrency(resultingBudget)}.\n\nVinde fotbaliști din lot pentru a-ți spori bugetul!`
+        `Nu poți plasa această ofertă de ${formatCurrency(offerAmount)}!\n\nValoarea lotului tău este de ${formatCurrency(squadTotalValue)}, ceea ce îți permite un sold negativ de maximum 30% (${formatCurrency(minAllowedBalance)}).\n\nCu această ofertă, soldul tău ar ajunge la ${formatCurrency(resultingBudget)}.\n\nVinde fotbaliști din lot pentru a-ți spori bugetul!`
       );
       return;
     }
@@ -1156,7 +1156,7 @@ export const TransferMarketView: React.FC = () => {
                 <b className="text-rose-400 font-mono font-black text-sm">{formatCurrency(overdraftPrompt.resultingBudget)}</b>
               </div>
               <div className="flex items-center justify-between text-slate-400 text-[11px]">
-                <span>Limită maximă permisă (-50% din lot):</span>
+                <span>Limită maximă permisă (-30% din lot):</span>
                 <span className="font-mono text-amber-300">{formatCurrency(overdraftPrompt.maxLimit)}</span>
               </div>
             </div>
@@ -1166,7 +1166,7 @@ export const TransferMarketView: React.FC = () => {
                 <span>⚠️ Regulă Oficială SuperManager</span>
               </div>
               <p>
-                Poți intra în minus până la maximum 50% din valoarea lotului tău ({formatCurrency(overdraftPrompt.maxLimit)}).
+                Poți intra în minus până la maximum 30% din valoarea lotului tău ({formatCurrency(overdraftPrompt.maxLimit)}).
               </p>
               <p className="font-bold text-white">
                 Trebuie să fii pe plus înainte să înceapă etapa în realitate, când se salvează echipa pentru LIVE! Dacă te prinde începutul etapei în minus, NU primești puncte în clasament în etapa respectivă.
@@ -1197,7 +1197,7 @@ export const TransferMarketView: React.FC = () => {
         </div>
       )}
 
-      {/* Overdraft Block Modal (Exceeded 50% Squad Value Limit) */}
+      {/* Overdraft Block Modal (Exceeded 30% Squad Value Limit) */}
       {overdraftBlockMessage && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="w-full max-w-md bg-slate-900 border-2 border-rose-500/60 rounded-3xl p-5 shadow-2xl space-y-4">
@@ -1210,7 +1210,7 @@ export const TransferMarketView: React.FC = () => {
                   Limită Overdraft Depășită
                 </h3>
                 <span className="text-xs text-rose-300 font-bold">
-                  Maxim 50% din valoarea lotului permis în minus
+                  Maxim 30% din valoarea lotului permis în minus
                 </span>
               </div>
             </div>

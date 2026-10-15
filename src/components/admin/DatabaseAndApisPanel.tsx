@@ -54,7 +54,7 @@ export const DatabaseAndApisPanel: React.FC = () => {
 
     const simulatedPayload = {
       source: 'Sofascore & Opta Live Stream API (Free Tier)',
-      tournament: 'Superliga României 2024/2025 (Sofascore ID: 322)',
+      tournament: 'Superliga României 2026/2027 (Sofascore ID: 322)',
       fixture: `${selectedFixture.homeClubName} vs ${selectedFixture.awayClubName}`,
       stadium: selectedFixture.stadium,
       minute: Math.floor(Math.random() * 45) + 45,

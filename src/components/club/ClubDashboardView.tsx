@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useFantasy } from '../../context/FantasyContext';
+import { StarterSquadRevealView } from '../onboarding/StarterSquadRevealView';
+import { Player } from '../../types/football';
 import { formatCurrency } from '../../utils/scoringEngine';
 import {
   Shield,
@@ -16,6 +18,7 @@ import {
   Filter,
   DollarSign,
   Trophy,
+  X,
 } from 'lucide-react';
 
 export const ClubDashboardView: React.FC = () => {
@@ -26,7 +29,11 @@ export const ClubDashboardView: React.FC = () => {
     newsArticles,
     leagueSettings,
     leagueMembers,
+    squad,
+    players,
   } = useFantasy();
+
+  const [showStarterSquadModal, setShowStarterSquadModal] = useState(false);
 
   const [feedFilter, setFeedFilter] = useState<'all' | 'transfers' | 'members'>('all');
   const [copiedCode, setCopiedCode] = useState(false);
@@ -55,6 +62,14 @@ export const ClubDashboardView: React.FC = () => {
     }
     return true;
   });
+
+  // Compute actual squad players
+  const userSquadPlayers = useMemo(() => {
+    const starters = Object.values(squad.startingSlots).filter(Boolean) as string[];
+    const allIds = Array.from(new Set([...starters, ...squad.benchPlayerIds]));
+    const playerMap = new Map(players.map((p) => [p.id, p]));
+    return allIds.map((id) => playerMap.get(id)).filter(Boolean) as Player[];
+  }, [squad, players]);
 
   return (
     <div className="flex flex-col gap-4 pb-20">
@@ -128,6 +143,29 @@ export const ClubDashboardView: React.FC = () => {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Starter Squad Status Card (Pachet de debut acordat ~€5M) */}
+      <div className="p-3.5 bg-gradient-to-r from-emerald-950/40 via-slate-900 to-slate-900 border border-emerald-500/30 rounded-3xl flex items-center justify-between gap-3 shadow-lg">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-9 h-9 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <span className="font-extrabold text-white text-xs block truncate">
+              Pachet de Debut Superliga (14 Jucători)
+            </span>
+            <span className="text-[10px] text-slate-400 block truncate">
+              Acordat gratuit ca pornire · Buget disponibil transferuri: {formatCurrency(user.budget)}
+            </span>
+          </div>
+        </div>
+        <button
+          onClick={() => setShowStarterSquadModal(true)}
+          className="py-1.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs whitespace-nowrap shrink-0 transition-all shadow-md active:scale-95"
+        >
+          Vezi Carduri
+        </button>
       </div>
 
       {/* ================= SECOND SECTION: MINIMALIST NEWS FEED ================= */}
@@ -240,6 +278,28 @@ export const ClubDashboardView: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Modal to view 14 Starter Squad Cards */}
+      {showStarterSquadModal && (
+        <div className="fixed inset-0 z-50 bg-[#0B0E14] overflow-y-auto">
+          <div className="sticky top-0 z-50 bg-slate-950/90 backdrop-blur-md p-3 px-4 flex items-center justify-between border-b border-slate-800">
+            <div className="flex items-center gap-2 text-xs font-bold text-white">
+              <Shield className="w-4 h-4 text-emerald-400" />
+              <span>Carduri Lot de Debut (14 Fotbaliști)</span>
+            </div>
+            <button
+              onClick={() => setShowStarterSquadModal(false)}
+              className="py-1 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all"
+            >
+              Închide
+            </button>
+          </div>
+          <StarterSquadRevealView
+            allocatedSquad={userSquadPlayers.length >= 14 ? userSquadPlayers : players.slice(0, 14)}
+            onCompleteSquad={() => setShowStarterSquadModal(false)}
+          />
+        </div>
+      )}
     </div>
   );
 };

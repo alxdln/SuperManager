@@ -16,6 +16,7 @@ import {
   UserProfile,
   LeagueNewsArticle,
   MatchEventType,
+  PlayerStats,
 } from '../types/football';
 import { INITIAL_PLAYERS, INITIAL_FIXTURES, INITIAL_LEAGUE_NEWS } from '../data/superligaData';
 import { ALL_16_SUPERLIGA_PLAYERS } from '../data/superligaAll16ClubsPlayers';
@@ -28,6 +29,10 @@ import {
   findFirestoreUser,
   saveFirestoreLeague,
   findFirestoreLeagueByCode,
+  saveGlobalPlayerEdit,
+  deleteGlobalPlayer,
+  loadFirestoreGlobalPlayers,
+  loadFirestoreDeletedPlayerIds,
 } from '../lib/firebase';
 
 interface FantasyContextType {
@@ -49,6 +54,7 @@ interface FantasyContextType {
   // Players & Squad
   players: Player[];
   squad: SquadState;
+  allocateStarterSquad: (newSquadPlayers: Player[]) => void;
   changeFormation: (formation: TacticalFormation) => void;
   assignPlayerToSlot: (slotId: string, playerId: string) => void;
   removePlayerFromSlot: (slotId: string) => void;
@@ -109,6 +115,8 @@ interface FantasyContextType {
   addNewPlayer: (playerData: Omit<Player, 'id' | 'pointsTotal' | 'pointsMatchday' | 'matchHistory' | 'valueTrend' | 'previousMarketValue'>) => void;
   updatePlayerStatus: (playerId: string, status: 'active' | 'injured' | 'suspended', reason?: string) => void;
   updatePlayerMarketValue: (playerId: string, newValue: number) => void;
+  updateGlobalPlayerData: (updatedPlayer: Player) => Promise<boolean>;
+  deletePlayerGlobal: (playerId: string) => Promise<boolean>;
 
   // Computed Values & Squad Rules
   squadPointsMatchday: number;
@@ -165,18 +173,68 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return localStorage.getItem(`${STORAGE_KEY}_auth`) === 'true';
   });
 
-  // All Players List (All 16 Liga 1 Clubs)
+  // All Players List (All 16 Liga 1 Clubs - Official 2026/2027)
   const [players, setPlayers] = useState<Player[]>(() => {
+    // 1. Get cached deleted player IDs (tombstones)
+    const localDeleted = (() => {
+      try {
+        return new Set<string>(JSON.parse(localStorage.getItem('supermanager_deleted_player_ids') || '[]'));
+      } catch (e) {
+        return new Set<string>();
+      }
+    })();
+
+    // 2. Get cached custom created players
+    const localCustom: Player[] = (() => {
+      try {
+        return JSON.parse(localStorage.getItem('supermanager_custom_players') || '[]');
+      } catch (e) {
+        return [];
+      }
+    })();
+
+    // 3. Get cached player overrides
+    const overrides: Record<string, Partial<Player>> = (() => {
+      try {
+        return JSON.parse(localStorage.getItem('supermanager_player_overrides') || '{}');
+      } catch (e) {
+        return {};
+      }
+    })();
+
+    // 4. Load base saved list or ALL_16_SUPERLIGA_PLAYERS
+    let baseList: Player[] = ALL_16_SUPERLIGA_PLAYERS;
     const saved = localStorage.getItem(`${STORAGE_KEY}_players`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length >= ALL_16_SUPERLIGA_PLAYERS.length) {
-          return parsed;
+        if (Array.isArray(parsed) && parsed.length >= 20) {
+          baseList = parsed;
         }
       } catch (e) { /* ignore */ }
     }
-    return ALL_16_SUPERLIGA_PLAYERS;
+
+    // Merge base with custom players
+    const map = new Map<string, Player>();
+    baseList.forEach((p) => {
+      if (p && p.id) map.set(p.id, p);
+    });
+    localCustom.forEach((p) => {
+      if (p && p.id) {
+        const exist = map.get(p.id);
+        map.set(p.id, exist ? { ...exist, ...p } : p);
+      }
+    });
+
+    // Filter out deleted players, sanitize obsolete relegated clubs, and apply overrides
+    const result: Player[] = [];
+    map.forEach((p) => {
+      if (localDeleted.has(p.id)) return;
+      if (p.clubId === 'iasi' || p.clubId === 'buzau' || p.clubId === 'slobozia') return;
+      result.push(overrides[p.id] ? { ...p, ...overrides[p.id] } : p);
+    });
+
+    return result;
   });
 
   // Squad State
@@ -453,6 +511,73 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.setItem(`${STORAGE_KEY}_settings`, JSON.stringify(leagueSettings));
   }, [leagueSettings]);
 
+  // Synchronize Global Players, Additions & Deletions from Firestore Database across all users
+  useEffect(() => {
+    let isMounted = true;
+    async function syncGlobalPlayersFromFirestore() {
+      try {
+        const [remotePlayers, remoteCustom, remoteDeleted] = await Promise.all([
+          loadFirestoreGlobalPlayers(),
+          loadFirestoreCustomPlayers(),
+          loadFirestoreDeletedPlayerIds(),
+        ]);
+
+        if (!isMounted) return;
+
+        const deletedSet = new Set(remoteDeleted);
+
+        setPlayers((prev) => {
+          const map = new Map<string, Player>();
+
+          // 1. Keep non-deleted players from current state
+          prev.forEach((p) => {
+            if (p && p.id && !deletedSet.has(p.id)) {
+              map.set(p.id, p);
+            }
+          });
+
+          // 2. Add or update remote custom players
+          remoteCustom.forEach((p) => {
+            if (p && p.id && !deletedSet.has(p.id)) {
+              const existing = map.get(p.id);
+              map.set(p.id, existing ? { ...existing, ...p } : p);
+            }
+          });
+
+          // 3. Apply global player edits or new players from all_players
+          Object.values(remotePlayers).forEach((p) => {
+            if (p && p.id && !deletedSet.has(p.id)) {
+              const existing = map.get(p.id);
+              if (existing) {
+                map.set(p.id, { ...existing, ...p });
+              } else if (p.name && p.clubId && p.position) {
+                map.set(p.id, p as Player);
+              }
+            }
+          });
+
+          const finalList = Array.from(map.values());
+          try {
+            localStorage.setItem(`${STORAGE_KEY}_players`, JSON.stringify(finalList));
+          } catch (e) {
+            /* ignore */
+          }
+          return finalList;
+        });
+
+        // Also clean up unifiedMarketItems if any deleted player was listed!
+        setUnifiedMarketItems((prev) => prev.filter((item) => !deletedSet.has(item.playerId)));
+      } catch (e) {
+        console.warn('Sync global players note:', e);
+      }
+    }
+
+    syncGlobalPlayersFromFirestore();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Maintain daily random league listings: at least 1 player per position (GK, DEF, MID, FWD)
   // with random auction duration between 24 and 72 hours (1 to 3 days in hours)
   useEffect(() => {
@@ -565,9 +690,9 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return total;
   }, [players, squad]);
 
-  // Overdraft Financial Computations (-50% max allowed overdraft)
+  // Overdraft Financial Computations (-30% max allowed overdraft)
   const squadMarketValue = squadTotalValue;
-  const maxOverdraftLimit = useMemo(() => Math.round(squadMarketValue * 0.5), [squadMarketValue]);
+  const maxOverdraftLimit = useMemo(() => Math.round(squadMarketValue * 0.3), [squadMarketValue]);
   const minAllowedBalance = useMemo(() => -maxOverdraftLimit, [maxOverdraftLimit]);
   const isBudgetNegative = user.budget < 0;
   // If user budget is negative when live matches run or matchday starts, points are penalized to 0 in team standings
@@ -841,6 +966,72 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return true;
   };
 
+  // Alocare Lot de Debut (Pachet de început: 14 jucători echilibrați pe posturi)
+  // Bugetul ulterior de transferuri: 5 milioane de euro (€5.00M)
+  const allocateStarterSquad = (newSquadPlayers: Player[]) => {
+    if (!newSquadPlayers || newSquadPlayers.length === 0) return;
+
+    const gk = newSquadPlayers.find((p) => p.position === 'GK') || newSquadPlayers[0];
+    const defs = newSquadPlayers.filter((p) => p.position === 'DEF' && p.id !== gk?.id);
+    const mids = newSquadPlayers.filter((p) => p.position === 'MID' && p.id !== gk?.id);
+    const fwds = newSquadPlayers.filter((p) => p.position === 'FWD' && p.id !== gk?.id);
+
+    const startDefs = defs.slice(0, 4);
+    const startMids = mids.slice(0, 4);
+    const startFwds = fwds.slice(0, 2);
+
+    const starters = [gk, ...startDefs, ...startMids, ...startFwds].filter(Boolean);
+    const startersIds = new Set(starters.map((p) => p.id));
+    const bench = newSquadPlayers.filter((p) => !startersIds.has(p.id));
+
+    const newSlots: Record<string, string | null> = {
+      gk: gk ? gk.id : null,
+      lb: startDefs[0] ? startDefs[0].id : null,
+      lcb: startDefs[1] ? startDefs[1].id : null,
+      rcb: startDefs[2] ? startDefs[2].id : null,
+      rb: startDefs[3] ? startDefs[3].id : null,
+      lm: startMids[0] ? startMids[0].id : null,
+      lcm: startMids[1] ? startMids[1].id : null,
+      rcm: startMids[2] ? startMids[2].id : null,
+      rm: startMids[3] ? startMids[3].id : null,
+      lst: startFwds[0] ? startFwds[0].id : null,
+      rst: startFwds[1] ? startFwds[1].id : null,
+    };
+
+    setSquad({
+      formation: '4-4-2',
+      startingSlots: newSlots,
+      benchPlayerIds: bench.map((p) => p.id),
+      captainPlayerId: starters[0]?.id || null,
+      boosterActive: false,
+    });
+
+    // Set remaining transfer budget to €5.00M (€5,000,000)
+    setUser((prev) => {
+      const updated = {
+        ...prev,
+        budget: 5000000,
+        starterPackClaimed: true,
+      };
+      localStorage.setItem(`${STORAGE_KEY}_user`, JSON.stringify(updated));
+      return updated;
+    });
+
+    // Add news article to feed
+    addNewsArticle({
+      title: `Pachet de Debut Finalizat: ${user.name} a primit lotul de 14 jucători!`,
+      summary: `Echipa ${user.teamName} a fost formată cu succes în limita a €5.00M. Buget disponibil de transferuri: €5.00M.`,
+      content: `Managerul ${user.name} a finalizat parcursul de atribuire a fotbaliștilor și se alătură competiției din Superliga României 2026/27.`,
+      tag: 'TRANSFER',
+    });
+
+    addNotification({
+      title: 'Lot de Debut Alocat!',
+      message: 'Cei 14 jucători au fost adăugați în lot. Ai la dispoziție €5.00M pentru transferuri ulterioare.',
+      type: 'reward',
+    });
+  };
+
   // Squad management
   // RULE 1: Jucătorii pot fi folosiți DOAR pe pozițiile lor (GK, DEF, MID, FWD)!
   const changeFormation = (newFormation: TacticalFormation) => {
@@ -1020,14 +1211,14 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!player) return { success: false, message: 'Jucătorul nu există în baza de date.' };
 
     // OVERDRAFT CHECK:
-    // Poti intra maxim in minus 50% din valoarea lotului tau (-maxOverdraftLimit).
+    // Poti intra maxim in minus 30% din valoarea lotului tau (-maxOverdraftLimit).
     const resultingBudget = user.budget - offerAmount;
     if (resultingBudget < minAllowedBalance) {
       return {
         success: false,
         isOverdraftExceeded: true,
         requiredAmount: offerAmount,
-        message: `Ai depășit limita maximă de overdraft! Valoarea lotului tău este de ${formatCurrency(squadTotalValue)}, deci poți intra în minus cel mult 50% (${formatCurrency(minAllowedBalance)}). Bugetul tău ar fi devenit ${formatCurrency(resultingBudget)}. Vinde jucători pentru a continua!`,
+        message: `Ai depășit limita maximă de overdraft! Valoarea lotului tău este de ${formatCurrency(squadTotalValue)}, deci poți intra în minus cel mult 30% (${formatCurrency(minAllowedBalance)}). Bugetul tău ar fi devenit ${formatCurrency(resultingBudget)}. Vinde jucători pentru a continua!`,
       };
     }
 
@@ -2000,9 +2191,21 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     setPlayers((prev) => [newP, ...prev]);
 
-    // Save persistently to Firestore database
-    saveFirestoreCustomPlayer(newP).catch((err) => {
+    // Save to local custom list for immediate offline resilience
+    try {
+      const customList: Player[] = JSON.parse(localStorage.getItem('supermanager_custom_players') || '[]');
+      customList.unshift(newP);
+      localStorage.setItem('supermanager_custom_players', JSON.stringify(customList));
+    } catch (e) {
+      /* ignore */
+    }
+
+    // Save persistently to Firestore database collections
+    saveGlobalPlayerEdit(newP).catch((err) => {
       console.warn('Eroare la salvarea în Firestore:', err);
+    });
+    saveFirestoreCustomPlayer(newP).catch((err) => {
+      console.warn('Eroare la salvarea custom player:', err);
     });
 
     // Automatically list new player on the unified market from the League!
@@ -2074,6 +2277,52 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         return p;
       })
     );
+  };
+
+  const updateGlobalPlayerData = async (updatedPlayer: Player): Promise<boolean> => {
+    // 1. Update in players state
+    setPlayers((prev) =>
+      prev.map((p) => (p.id === updatedPlayer.id ? { ...p, ...updatedPlayer } : p))
+    );
+
+    // 2. Persist to Firestore and local overrides
+    await saveGlobalPlayerEdit(updatedPlayer);
+
+    // 3. Update in market items if listed
+    setUnifiedMarketItems((prev) =>
+      prev.map((item) => {
+        if (item.playerId === updatedPlayer.id) {
+          return {
+            ...item,
+            leagueBaseOffer: updatedPlayer.marketValue,
+            minAskingPrice: Math.round(updatedPlayer.marketValue * 1.25),
+          };
+        }
+        return item;
+      })
+    );
+
+    addNotification({
+      title: '✅ Modificări Publicate Global',
+      message: `Datele pentru ${updatedPlayer.name} au fost salvate și sincronizate în toată aplicația!`,
+      type: 'reward',
+    });
+
+    return true;
+  };
+
+  const deletePlayerGlobal = async (playerId: string): Promise<boolean> => {
+    setPlayers((prev) => prev.filter((p) => p.id !== playerId));
+    setUnifiedMarketItems((prev) => prev.filter((item) => item.playerId !== playerId));
+    await deleteGlobalPlayer(playerId);
+
+    addNotification({
+      title: '🗑️ Jucător Șters',
+      message: `Jucătorul a fost eliminat definitiv din baza de date globală.`,
+      type: 'transfer',
+    });
+
+    return true;
   };
 
   // 3-MINUTE DEMO MATCH ENGINE
@@ -2165,7 +2414,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
               type: MatchEventType;
               desc: string;
               points: number;
-              statKey?: keyof Player['stats'];
+              statKey?: keyof PlayerStats;
               isHomeGoal?: boolean;
               isAwayGoal?: boolean;
             };
@@ -2233,9 +2482,9 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
               setPlayers((prev) =>
                 prev.map((p) => {
                   if (p.id === targetPlayer.id) {
-                    const updatedStats = { ...p.stats };
-                    if (chosen.statKey && typeof updatedStats[chosen.statKey] === 'number') {
-                      (updatedStats[chosen.statKey] as number) += 1;
+                    const updatedStats: PlayerStats = { ...p.stats };
+                    if (chosen.statKey && typeof (updatedStats as Record<string, any>)[chosen.statKey] === 'number') {
+                      ((updatedStats as Record<string, any>)[chosen.statKey] as number) += 1;
                     }
                     return {
                       ...p,
@@ -2274,6 +2523,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         addNewsArticle,
         players,
         squad,
+        allocateStarterSquad,
         changeFormation,
         assignPlayerToSlot,
         removePlayerFromSlot,
@@ -2312,6 +2562,8 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         addNewPlayer,
         updatePlayerStatus,
         updatePlayerMarketValue,
+        updateGlobalPlayerData,
+        deletePlayerGlobal,
         squadPointsMatchday,
         rawSquadPointsMatchday,
         squadTotalValue,

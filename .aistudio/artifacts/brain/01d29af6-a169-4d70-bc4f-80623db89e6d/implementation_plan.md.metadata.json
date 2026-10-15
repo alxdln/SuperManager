@@ -1,6 +1,6 @@
 {
-  "summary": "Plan detaliat de implementare pentru SuperManager România:\n- Acces Admin & Bază de Date exclusiv prin Creator OS (PIN 1923)\n- Conexiune API live Sofascore și Opta cu mapare pe Scoring Engine\n- Bază de date Firestore completă cu toate cele 16 cluburi din Superliga\n- Autentificare obligatorie pe dispozitive noi cu persistență în Firestore\n- Roadmap complet: Înregistrare -> Creare/Alăturare Ligă cu setări financiare -> Cod/Link invitație -> Pagina 'Club'\n- Pagină dedicată 'Club' (antet cu valoare lot, profil, nr. jucători + news feed transferuri și activitate)\n- Curățare ecran 'Echipa' (fără duplicate de puncte și valoare lot)",
-  "updatedAt": "2026-10-14T14:32:17.025300238Z",
+  "summary": "Plan de simplificare a structurii de date pentru jucători la cele 6 atribute esențiale (Nume Complet, Club, Poziție, Naționalitate, Avatar/Poză, Cotă Transfermarkt) cu păstrarea punctajului total calculat automat la etape, eliminarea câmpurilor secundare inutile din baza de date și asigurarea persistenței globale în timp real prin Firestore pentru toți managerii din joc.",
+  "updatedAt": "2026-10-15T13:05:25.631571743Z",
   "requestFeedback": true,
   "userFacing": true
 }

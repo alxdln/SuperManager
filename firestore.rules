@@ -39,6 +39,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Permanently deleted players for global sync
+    match /deleted_players/{playerId} {
+      allow read, write: if true;
+    }
+
     // App state, persistent settings and squad test data
     match /app_settings/{docId} {
       allow read, write: if true;

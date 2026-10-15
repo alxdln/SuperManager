@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useFantasy } from '../../context/FantasyContext';
+import { StarterSquadRevealView } from '../onboarding/StarterSquadRevealView';
+import { generateRandomStarterSquad } from '../../data/superligaAll16ClubsPlayers';
 import {
   Shield,
   Trophy,
@@ -32,10 +34,17 @@ export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps>
     createNewLeague,
     joinLeagueByCode,
     leagueSettings,
+    players,
+    allocateStarterSquad,
   } = useFantasy();
 
-  // Internal Step: 1 = Auth, 2 = Create/Join League, 3 = Invite Friends
-  const [step, setStep] = useState<1 | 2 | 3>(() => (!isAuthenticated ? 1 : 2));
+  // Internal Step: 1 = Auth, 2 = Create/Join League, 3 = Invite Friends, 4 = Starter Squad Reveal (14 Players / €5M)
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(() => (!isAuthenticated ? 1 : !user.starterPackClaimed ? 4 : 2));
+
+  // Pre-generate starter squad of 14 players
+  const randomStarterSquad = useMemo(() => {
+    return generateRandomStarterSquad(players);
+  }, [players]);
 
   // Step 1: Auth form state
   const [authMode, setAuthMode] = useState<'login' | 'register'>('register');
@@ -155,6 +164,21 @@ export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps>
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
+  // STEP 4: STARTER SQUAD ALLOCATION (14 PLAYERS / ~€5M)
+  if (step === 4) {
+    return (
+      <div className="fixed inset-0 z-50 bg-[#0B0E14] text-white overflow-y-auto">
+        <StarterSquadRevealView
+          allocatedSquad={randomStarterSquad}
+          onCompleteSquad={(squad) => {
+            allocateStarterSquad(squad);
+            onComplete();
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-[#0B0E14] text-white flex flex-col justify-between overflow-y-auto px-4 py-6 sm:py-10">
       <div className="max-w-md w-full mx-auto space-y-6">
@@ -170,11 +194,12 @@ export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps>
             Singurul fantasy game oficial cu reguli live, acțiuni din meciuri reale și ligă privată cu prietenii.
           </p>
 
-          {/* Stepper Progress Bar */}
+          {/* Stepper Progress Bar (4 Pasi: Cont -> Liga -> Invitatie -> Lot 14 Jucatori) */}
           <div className="flex items-center justify-center gap-2 pt-3">
             <div className={`h-1.5 rounded-full transition-all ${step === 1 ? 'w-10 bg-emerald-400' : 'w-4 bg-emerald-400/50'}`} />
             <div className={`h-1.5 rounded-full transition-all ${step === 2 ? 'w-10 bg-emerald-400' : step > 2 ? 'w-4 bg-emerald-400/50' : 'w-4 bg-slate-800'}`} />
             <div className={`h-1.5 rounded-full transition-all ${step === 3 ? 'w-10 bg-emerald-400' : 'w-4 bg-slate-800'}`} />
+            <div className="h-1.5 rounded-full transition-all w-4 bg-slate-800" />
           </div>
         </div>
 
@@ -542,13 +567,13 @@ export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps>
               </button>
             </div>
 
-            {/* Continue to Club Button */}
+            {/* Continue to Starter Squad Allocation (Step 4) */}
             <button
               type="button"
-              onClick={onComplete}
-              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/25 active:scale-95 transition-all mt-4"
+              onClick={() => setStep(4)}
+              className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/25 active:scale-95 transition-all mt-4"
             >
-              <span>Continuă spre Club (Dashboard)</span>
+              <span>Pasul Următor: Primire Lot de Debut (14 Jucători)</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>

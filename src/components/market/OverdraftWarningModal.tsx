@@ -61,7 +61,7 @@ export const OverdraftWarningModal: React.FC<OverdraftWarningModalProps> = ({
           </div>
 
           <div className="flex items-center justify-between pb-1.5 border-b border-slate-800">
-            <span className="text-slate-400">Descoperire maximă permisă (-50%):</span>
+            <span className="text-slate-400">Descoperire maximă permisă (-30%):</span>
             <span className="font-mono font-bold text-amber-400">-{formatCurrency(maxOverdraft)}</span>
           </div>
 
@@ -85,7 +85,7 @@ export const OverdraftWarningModal: React.FC<OverdraftWarningModalProps> = ({
             <span>Regulament Oficial Financiar:</span>
           </div>
           <p>
-            Poți intra în minus cu bugetul <b>până la maxim 50% din valoarea lotului tău</b>. Dacă finalizezi transferul, balanța ta ar deveni <b>{formatFullCurrency(projectedBalance)}</b>, depășind limita minimă admisă cu <b>{formatCurrency(shortfall)}</b>.
+            Poți intra în minus cu bugetul <b>până la maxim 30% din valoarea lotului tău</b>. Dacă finalizezi transferul, balanța ta ar deveni <b>{formatFullCurrency(projectedBalance)}</b>, depășind limita minimă admisă cu <b>{formatCurrency(shortfall)}</b>.
           </p>
           <p className="text-rose-300 font-semibold">
             ⚠️ Amintește-ți: Trebuie să revii pe plus înainte de startul meciurilor etapei! Dacă te prinde startul etapei pe minus, echipa ta primește 0 puncte în clasament.

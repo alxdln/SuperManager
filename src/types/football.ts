@@ -9,6 +9,7 @@ export interface Club {
   secondaryColor: string;
   badgeText: string;
   stadium: string;
+  logoUrl?: string;
 }
 
 export interface PlayerStats {
@@ -47,24 +48,30 @@ export interface MatchHistoryItem {
 
 export interface Player {
   id: string;
-  name: string;
-  firstName: string;
-  lastName: string;
-  clubId: string;
-  position: PlayerPosition;
-  number: number;
-  marketValue: number; // EUR
-  previousMarketValue: number;
-  pointsTotal: number;
+  name: string; // 1. Nume Complet
+  clubId: string; // 2. Club
+  position: PlayerPosition; // 3. Poziție
+  nationality: string; // 4. Naționalitate
+  avatar: string; // 5. Avatar / Poză
+  marketValue: number; // 6. Cotă Transfermarkt (EUR)
+  pointsTotal: number; // Punctaj Fantasy Total
+
+  // Câmpuri de runtime fantasy engine
   pointsMatchday: number;
-  status: 'active' | 'injured' | 'suspended';
-  injuryReason?: string;
-  avatar: string;
-  nationality: string;
-  age: number;
+  previousMarketValue: number;
+  valueTrend: number[];
   stats: PlayerStats;
   matchHistory: MatchHistoryItem[];
-  valueTrend: number[]; // Last 5 market valuations
+
+  // Câmpuri secundare opționale (eliminate din formular și baza de date)
+  firstName?: string;
+  lastName?: string;
+  clubName?: string;
+  clubBadge?: string;
+  number?: number;
+  status?: 'active' | 'injured' | 'suspended';
+  injuryReason?: string;
+  age?: number;
 }
 
 export type TacticalFormation = 
@@ -304,4 +311,6 @@ export interface UserProfile {
   budget: number;
   fanCoins: number;
   checkinsCount: number;
+  leagueId?: string;
+  starterPackClaimed?: boolean;
 }

@@ -6,24 +6,19 @@ import { formatCurrency, formatFullCurrency } from '../../utils/scoringEngine';
 import {
   Shield,
   Plus,
-  Search,
-  Filter,
   CheckCircle2,
   AlertTriangle,
   RefreshCw,
   LogOut,
   Sparkles,
   TrendingUp,
-  Layers,
   Database,
   ArrowLeft,
-  DollarSign,
-  UserCheck,
-  ShieldAlert,
   Sliders,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { DatabaseAndApisPanel } from '../admin/DatabaseAndApisPanel';
+import { DatabaseNavigatorView } from './DatabaseNavigatorView';
 
 interface CreatorDashboardViewProps {
   onExit: () => void;
@@ -33,14 +28,12 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({ onEx
   const {
     players,
     addNewPlayer,
-    updatePlayerStatus,
-    updatePlayerMarketValue,
     recalculateMarketValuesFromWeeklyTrades,
     leagueSettings,
     unifiedMarketItems,
   } = useFantasy();
 
-  const [activeTab, setActiveTab] = useState<'addPlayer' | 'managePlayers' | 'marketEngine' | 'databaseAndApis'>('addPlayer');
+  const [activeTab, setActiveTab] = useState<'navigator' | 'addPlayer' | 'marketEngine' | 'databaseAndApis'>('navigator');
 
   // Form states for adding new player
   const [firstName, setFirstName] = useState('');
@@ -51,11 +44,6 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({ onEx
   const [avatarUrl, setAvatarUrl] = useState('');
   const [nationality, setNationality] = useState('România');
   const [successMsg, setSuccessMsg] = useState('');
-
-  // Search & filter for player management tab
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterClub, setFilterClub] = useState<string>('ALL');
-  const [filterPos, setFilterPos] = useState<string>('ALL');
 
   const handleCreatePlayer = (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,16 +107,6 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({ onEx
     setTimeout(() => setSuccessMsg(''), 4000);
   };
 
-  const filteredPlayers = players.filter((p) => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      if (!p.name.toLowerCase().includes(q)) return false;
-    }
-    if (filterClub !== 'ALL' && p.clubId !== filterClub) return false;
-    if (filterPos !== 'ALL' && p.position !== filterPos) return false;
-    return true;
-  });
-
   return (
     <div className="min-h-screen bg-[#06090e] text-slate-100 flex flex-col font-sans">
       {/* Top Standalone Creator Navigation Bar */}
@@ -187,34 +165,34 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({ onEx
         {/* Tab Switcher */}
         <div className="flex items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-2xl text-xs font-bold overflow-x-auto scrollbar-none">
           <button
+            onClick={() => setActiveTab('navigator')}
+            className={`shrink-0 py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-2 ${
+              activeTab === 'navigator'
+                ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg shadow-indigo-600/30'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span>Navigator Bază de Date &amp; Gestionare Jucători</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('addPlayer')}
-            className={`shrink-0 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            className={`shrink-0 py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'addPlayer'
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg shadow-indigo-600/30'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Adaugă Fotbalist</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('managePlayers')}
-            className={`shrink-0 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'managePlayers'
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <UserCheck className="w-3.5 h-3.5" />
-            <span>Gestionare Jucători &amp; Status</span>
+            <span>Adaugă Fotbalist Nou</span>
           </button>
 
           <button
             onClick={() => setActiveTab('marketEngine')}
-            className={`shrink-0 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            className={`shrink-0 py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'marketEngine'
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg shadow-indigo-600/30'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
@@ -224,14 +202,14 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({ onEx
 
           <button
             onClick={() => setActiveTab('databaseAndApis')}
-            className={`shrink-0 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            className={`shrink-0 py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'databaseAndApis'
                 ? 'bg-emerald-500 text-slate-950 font-black shadow-lg shadow-emerald-500/30'
                 : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30'
             }`}
           >
-            <Database className="w-3.5 h-3.5" />
-            <span>Bază de Date &amp; API-uri</span>
+            <Sliders className="w-3.5 h-3.5" />
+            <span>Sincronizare Sofascore &amp; Firestore</span>
           </button>
         </div>
 
@@ -360,127 +338,8 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({ onEx
           </form>
         )}
 
-        {/* TAB 2: MANAGE EXISTING PLAYERS */}
-        {activeTab === 'managePlayers' && (
-          <div className="p-5 bg-slate-900 border border-slate-800 rounded-3xl space-y-4 shadow-xl text-xs">
-            <div className="flex flex-col sm:flex-row gap-2 justify-between items-start sm:items-center border-b border-slate-800 pb-3">
-              <div>
-                <h3 className="text-sm font-bold text-white">Baza de Date Fotbaliști ({players.length})</h3>
-                <p className="text-[11px] text-slate-400">Actualizează cotele Transfermarkt sau statutul medical/disciplinar</p>
-              </div>
-
-              {/* Search bar */}
-              <div className="relative w-full sm:w-64">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
-                <input
-                  type="text"
-                  placeholder="Caută după nume..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white text-xs"
-                />
-              </div>
-            </div>
-
-            {/* Filters */}
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              <select
-                value={filterClub}
-                onChange={(e) => setFilterClub(e.target.value)}
-                className="p-1.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-xs"
-              >
-                <option value="ALL">Toate Cluburile</option>
-                {SUPERLIGA_CLUBS.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-
-              <select
-                value={filterPos}
-                onChange={(e) => setFilterPos(e.target.value)}
-                className="p-1.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-xs"
-              >
-                <option value="ALL">Toate Pozițiile</option>
-                <option value="GK">Portari</option>
-                <option value="DEF">Fundași</option>
-                <option value="MID">Mijlocași</option>
-                <option value="FWD">Atacanți</option>
-              </select>
-            </div>
-
-            {/* Players Table / List */}
-            <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-              {filteredPlayers.map((player) => {
-                const club = SUPERLIGA_CLUBS.find((c) => c.id === player.clubId);
-
-                return (
-                  <div
-                    key={player.id}
-                    className="p-3 bg-slate-800/40 border border-slate-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                  >
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={player.avatar}
-                        alt={player.name}
-                        className="w-10 h-10 rounded-xl object-cover border border-slate-700 bg-slate-950 shrink-0"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(player.name)}&background=0f172a&color=05df72&bold=true`;
-                        }}
-                      />
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-white text-sm">{player.name}</span>
-                          <span className="text-[10px] font-mono px-1 rounded bg-slate-700 text-slate-300">
-                            {player.position}
-                          </span>
-                        </div>
-                        <span className="text-slate-400 text-[11px]">
-                          {club?.name} · Cotă Transfermarkt: <b className="text-emerald-400 font-mono">{formatCurrency(player.marketValue)}</b>
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Status actions */}
-                    <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
-                      <button
-                        onClick={() => updatePlayerStatus(player.id, 'active')}
-                        className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
-                          player.status === 'active'
-                            ? 'bg-emerald-500 text-slate-950 font-black'
-                            : 'bg-slate-800 text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        Activ
-                      </button>
-
-                      <button
-                        onClick={() => updatePlayerStatus(player.id, 'injured', 'Entorsă de gleznă (indisponibil 2 săptămâni)')}
-                        className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
-                          player.status === 'injured'
-                            ? 'bg-rose-600 text-white font-black'
-                            : 'bg-slate-800 text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        Accidentat
-                      </button>
-
-                      <button
-                        onClick={() => updatePlayerStatus(player.id, 'suspended', 'Cumul de cartonașe galbene (1 etapă suspendare)')}
-                        className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
-                          player.status === 'suspended'
-                            ? 'bg-amber-500 text-slate-950 font-black'
-                            : 'bg-slate-800 text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        Suspendat
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        {/* TAB 1: MASTER DATABASE NAVIGATOR */}
+        {activeTab === 'navigator' && <DatabaseNavigatorView />}
 
         {/* TAB 3: MARKET & ENGINE CONTROLS */}
         {activeTab === 'marketEngine' && (

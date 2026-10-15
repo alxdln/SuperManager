@@ -41,8 +41,8 @@ export const MobileShell: React.FC = () => {
   const [adminInitialTab, setAdminInitialTab] = useState<'addPlayer' | 'managePlayers' | 'leagueSettings' | 'databaseAndApis'>('databaseAndApis');
   const [isCreatorMode, setIsCreatorMode] = useState(false);
 
-  // If user is not logged in or has not finished onboarding
-  if (!isAuthenticated) {
+  // If user is not logged in or has not finished onboarding (including 14-player starter squad allocation)
+  if (!isAuthenticated || !user.starterPackClaimed) {
     return <GameAuthAndOnboardingFlow onComplete={() => setActiveTab('club')} />;
   }
 

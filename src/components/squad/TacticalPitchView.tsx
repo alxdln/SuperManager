@@ -183,7 +183,7 @@ export const TacticalPitchView: React.FC = () => {
               Sold Negativ: {formatCurrency(user.budget)}
             </span>
             <span className="text-slate-300 block mt-0.5 leading-relaxed">
-              Poți intra în minus până la maxim 50% din valoarea lotului ({formatCurrency(minAllowedBalance)}). Pentru a primi puncte în clasamentul etapei, revino pe plus înainte de startul oficial al etapei când se salvează echipa pentru LIVE!
+              Poți intra în minus până la maxim 30% din valoarea lotului ({formatCurrency(minAllowedBalance)}). Pentru a primi puncte în clasamentul etapei, revino pe plus înainte de startul oficial al etapei când se salvează echipa pentru LIVE!
             </span>
           </div>
         </div>

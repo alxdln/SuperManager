@@ -1,160 +1,92 @@
-# SuperManager România — Arhitectură Cloud Firestore, Conexiuni Sofascore/Opta & Noul Modul "Club"
+# Simplificare Bază de Date Jucători & Sincronizare Globală în Timp Real
 
-Plan complet de modernizare și sincronizare a jocului SuperManager România cu baza de date Firebase Firestore, eliminarea duplicărilor de date din interfață, integrarea fluxului de autentificare/onboarding și conectarea exclusivă a API-urilor Sofascore și Opta la motorul de scoring.
+Plan de optimizare a modelului de date pentru fotbaliști și asigurare a persistenței globale a modificărilor din Creator Hub în baza de date Firestore a jocului.
 
 ---
 
-## Decizii Confirmate de Utilizator
+### User Review & Critical Decisions
 
 > [!IMPORTANT]
-> - **Canal unic de administrare**: Se elimină butoanele rapide din Header și din Setări. Accesul la Panoul de Bază de Date & API-uri se face **exclusiv prin Metoda 3: Creator & Commissioner OS** securizat cu PIN (`1923`).
-> - **API-uri Live**: Se păstrează strict **Sofascore** și **Opta (API-Football)** (versiunile gratuite). **Flashscore este eliminat complet**. Toate evenimentele preluate din aceste două API-uri sunt mapate pe **Scoring Engine-ul nostru existent** (nu se alterează regulamentul de punctaj al jocului).
-> - **Bază de date Jucători Liga 1**: Se populează baza de date Firestore cu toate cele 16 cluburi din Superliga României (FCSB, CFR Cluj, Rapid, Universitatea Craiova, Dinamo, Farul, Oțelul, Sepsi, U Cluj, Petrolul, Hermannstadt, UTA Arad, Poli Iași, Botoșani, Buzău, Slobozia), fiecare fotbalist având ID unic intern ascuns, nume, prenume, club, poziție, poză și stemă oficială.
-> - **Autentificare obligatorie pe dispozitiv nou**: Dacă utilizatorul deschide jocul pe un dispozitiv neautentificat, este întâmpinat obligatoriu de ecranul de Login / Register (Email/Parolă, Google, Apple), datele salvându-se direct în Firestore (`users` collection).
-> - **Onboarding & Creare Ligă**: După înregistrare, utilizatorul trece printr-un ghid dedicat: Creare Ligă Privată (buget echipă, limită fotbaliști per club, nume ligă) sau Alăturare via Cod / Link de invitație.
-> - **Noul Tab "Club" în Footer (Landing Page)**: 
->   - Antet sus: Nume club, Poza profil manager, Valoare totală lot, Număr jucători în lot.
->   - Conținut principal: News feed minimalist (transferuri recente, intrări/ieșiri membri în ligă).
-> - **Optimizare Tab "Echipa"**: Se elimină duplicările de date (valoarea lotului și punctele de etapă se mută exclusiv la „Club”; la „Echipa” rămân doar contorul mărimii lotului, selectorul de formație tactică și terenul interactiv).
+> Confirmările primite de la utilizator au stabilit clar direcția:
+> - **Date esențiale păstrate**: Nume Complet, Club, Poziție, Naționalitate, Avatar/Poză, Cotă Transfermarkt (Transfermarkt €), plus punctajul fantasy total calculat automat la etape.
+> - **Câmpuri eliminate**: Statisticile secundare redundante (șuturi pe poartă, pase cheie, recuperări, deposedări, driblinguri, faulturi etc.) și formularele supraîncărcate sunt eliminate din baza de date și interfață.
+> - **Stil interfață Creator Hub**: Se păstrează designul actual și ergonomia existentă, eliminând strict câmpurile nenecesare din formularul de editare și din vizualizatorul de jucători.
+> - **Sincronizare Globală**: Orice modificare salvată în Creator Commissioner se publică instant în Firestore (`global_players`) și se propagă în timp real pentru toți managerii (echipe, piață de transferuri, ligi).
 
 ---
 
-## 1. Roadmap & Flux Utilizator (De la primul start la Dashboard)
+### 1. Overview & Core Concept
+
+- **Obiectiv**: Reducerea zgomotului de date și simplificarea radicală a entității `Player` la cele 6 atribute esențiale cerute:
+  1. **Nume Complet** (`name`)
+  2. **Club Superliga** (`clubId`)
+  3. **Poziție Oficială** (`position`: GK, DEF, MID, FWD)
+  4. **Naționalitate** (`nationality`)
+  5. **Avatar / Poză Oficială** (`avatar`)
+  6. **Cotă Transfermarkt** (`marketValue` în Euro)
+  *(Punctajul total `pointsTotal` rămâne atașat pentru calculul clasamentelor fantasy din joc)*
+- **Valoare Adăugată**: Formular de editare clar, rapid și fără rubrici inutile; baza de date devine compactă, performantă și sincronizată global pentru toți managerii care accesează aplicația.
+
+---
+
+### 2. User Experience & Visual Design
+
+- **Formular de Editare Compact în Creator Hub**:
+  - Modalul de editare din Creator Hub va conține strict cele 6 câmpuri cerute, organizate intuitiv într-un grid aerisit.
+  - Eliminarea secțiunilor voluminoase de statistici detaliate care îngreunau navigarea.
+  - Butonul de **Publicare Globală** cu confirmare prealabilă va salva datele în Firestore și va notifica creatorul prin feedback vizual imediat (toast de succes & animație subtilă).
+- **Lista de Jucători din Navigator**:
+  - Afișează curat avatarul, numele, clubul, poziția cu badge de culoare distinctiv, naționalitatea cu drapel/text și cota Transfermarkt în format tabular (`tabular-nums`).
+  - Căutare instantanee și filtre rapide după club și poziție.
+- **Propagare în Joc**:
+  - Managerii văd imediat noile cote, poziții sau nume pe Piața de Transferuri și în lotul propriu fără a fi nevoie de refresh manual.
+
+---
+
+### 3. Key Product Decisions & Trade-Offs
+
+- **Model de date unificat (Zero Bloat)**:
+  - *Abordare*: Eliminarea din `types/football.ts` și din `superligaAll16ClubsPlayers.ts` a zecilor de parametri secundari care nu mai sunt necesari.
+  - *Motiv*: Păstrează codul ușor de întreținut și reduce dramatic volumul de transfer în rețea și stocare Firestore.
+- **Sincronizare Hibridă Firestore + Cache Local**:
+  - *Abordare*: La salvarea unui jucător în Creator Hub, modificarea se scrie direct în colecția Firestore `global_players` și se actualizează `supermanager_player_overrides` în `localStorage`.
+  - *Motiv*: Garantează persistența la nivel de server pentru toți utilizatorii, asigurând în același timp afișare instantanee la nivel local chiar și la porniri offline.
+
+---
+
+### 4. Technical Architecture & Data Strategy
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 1. PORNIRE APLICAȚIE PE DISPOZITIV NOU                                       │
-│    Verificare sesiune activă Firestore Auth / Local Storage Tokens         │
-│    └─► Neautentificat? ──► ECRAN AUTENTIFICARE & ÎNREGISTRARE OBLIGATORIE   │
-└──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 2. FLUX ONBOARDING: LIGĂ PRIVATĂ SAU PUBLICĂ                                │
-│    Utilizatorul alege:                                                      │
-│    ├─ A) Creează o Ligă nouă (Nume virtual, Buget inițial, Max jucători/club)│
-│    └─ B) Introdu Cod de Invitație / Deschide Link (ex: SUPER-RAPID-2025)   │
-└──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 3. INVITAȚIE PRIETENI (SHARE MODAL)                                         │
-│    Generare link direct de alăturare și cod alfanumeric copiat cu 1-click   │
-└──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 4. LANDING PAGE PE DASHBOARD: TABUL "CLUB"                                   │
-│    ┌──────────────────────────────────────────────────────────────────┐     │
-│    │ Antet Club: Nume Echipă │ Poză Profil │ Valoare Lot │ Nr. Jucători│     │
-│    ├──────────────────────────────────────────────────────────────────┤     │
-│    │ News Feed Minimalist:                                            │     │
-│    │  • Transferuri confirmate în ligă                                │     │
-│    │  • Notificări noi membri / părăsire ligă                         │     │
-│    │  • Anunțuri de commissioner                                      │     │
-│    └──────────────────────────────────────────────────────────────────┘     │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│             Creator & Commissioner Hub                 │
+│  [Editare 6 Atribute] ──> [Confirmare Publicare]        │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+              ┌───────────────────────────┐
+              │   saveGlobalPlayerEdit    │
+              └─────────────┬─────────────┘
+                            │
+             ┌──────────────┴──────────────┐
+             ▼                             ▼
+┌─────────────────────────┐   ┌──────────────────────────┐
+│   Firestore Database    │   │      FantasyContext      │
+│  Collection:            │   │  - State-ul players      │
+│  `global_players`       │   │  - Piata transferuri     │
+│  (Sincronizare Globala) │   │  - Loturile managerilor  │
+└─────────────────────────┘   └──────────────────────────┘
 ```
 
----
-
-## 2. Arhitectura de Date & Colecții Firestore
-
-### Structură Firestore (`ai-studio-supermanagerromn-01d29af6-a169-4d70-bc4f-80623db89e6d`)
-
-1. **`users/{userId}`**:
-   - `id`: string (Firebase Auth UID)
-   - `email`: string
-   - `name`: string
-   - `teamName`: string (Numele clubului virtual)
-   - `avatar`: string URL
-   - `budget`: number (€)
-   - `leagueId`: string
-   - `squad`: array cu IDs jucători și formație
-   - `createdAt`: timestamp
-
-2. **`leagues/{leagueId}`**:
-   - `id`: string (ex: `liga-bucuresti-2025`)
-   - `name`: string
-   - `creatorUserId`: string
-   - `inviteCode`: string (6 caractere alfanumerice unice)
-   - `startingBudget`: number (€)
-   - `maxClubPlayers`: number (ex: max 3 de la FCSB per lot)
-   - `members`: array cu user IDs
-   - `activityFeed`: array de evenimente (transferuri, alăturări)
-
-3. **`players/{playerId}`**:
-   - `id`: string UUID intern (nevizibil în frontend)
-   - `firstName`: string (ex: "Alexandru")
-   - `lastName`: string (ex: "Mitriță")
-   - `clubId`: string (ex: "ucraiova")
-   - `clubName`: string ("Universitatea Craiova")
-   - `clubBadge`: string URL
-   - `position`: "GK" | "DEF" | "MID" | "FWD"
-   - `marketValue`: number
-   - `photo`: string URL
-   - `status`: "active" | "injured" | "suspended"
-
----
-
-## 3. Conexiune Live Sofascore & Opta (API-Football) cu Scoring Engine
-
-Flashscore se elimină complet din documentație, teste și cod. Se configurează cele 2 surse oficiale gratuite:
-
-```
-┌─────────────────────────────────┐       ┌─────────────────────────────────┐
-│         SOFASCORE API           │       │       OPTA / API-FOOTBALL       │
-│  • Preluare incidents live      │       │  • Superliga Fixtures (ID 283)  │
-│  • Note oficiale (1.0 - 10.0)   │       │  • Meciuri viitoare programate  │
-│  • Intervenții portari, șuturi  │       │  • Cartonașe, goluri, pase      │
-└────────────────┬────────────────┘       └────────────────┬────────────────┘
-                 │                                         │
-                 └────────────────────┬────────────────────┘
-                                      ▼
-             ┌─────────────────────────────────────────────────┐
-             │       ADAPTOR TRANSPUNERE EVENIMENTE            │
-             │   Transformă evenimentele brute externe în      │
-             │   codurile noastre: 'goal', 'assist', 'save',   │
-             │   'shot_on_target', 'yellow_card', 'clean_sheet'│
-             └────────────────────────┬────────────────────────┘
-                                      ▼
-             ┌─────────────────────────────────────────────────┐
-             │         SCORING ENGINE SUPERMANAGER             │
-             │  Calculează punctajul oficial al fotbalistului  │
-             │  conform grilei noastre stabilite!              │
-             └─────────────────────────────────────────────────┘
-```
-
----
-
-## 4. Modificări de Interfață & Componente
-
-1. **Curățare Header & MobileShell**:
-   - Se elimină butonul `ADMIN / DB` din Header.
-   - În modalul de Setări se elimină cardul/tabul direct de Bază de Date.
-   - Accesul la Panoul de Bază de Date și API-uri rămâne exclusiv în **Creator OS Dashboard** (securizat cu PIN 1923).
-2. **Navigație Footer Actualizată**:
-   - Tab 1: **Club** (Landing page cu profil manager, valoare lot, nr. jucători, news feed transferuri).
-   - Tab 2: **Echipa** (Tactical pitch, selectare 11 de start, selector formație; se elimină valoarea lotului și punctele de etapă care sunt deja la Club).
-   - Tab 3: **Meci** (Live match tracker cu simulare demo și evenimente).
-   - Tab 4: **Transferuri** (Piața transferurilor cu regulă de overdraft -50%).
-   - Tab 5: **Clasament** / **Predicții**.
-3. **Ecran Autentificare & Onboarding Ligă**:
-   - Modal/Ecran complet la pornire când utilizatorul nu este logat.
-   - Ecran pas-cu-pas pentru crearea sau introducerea codului de ligă.
-   - Buton de copiere link / cod invitație pentru prieteni.
-4. **Populare Bază de Date**:
-   - Generator complet pentru toate cele 16 cluburi din Liga 1 (FCSB, CFR Cluj, Rapid, Univ. Craiova, Farul, Dinamo, Oțelul Galați, U Cluj, Sepsi OSK, Petrolul, Hermannstadt, UTA Arad, Poli Iași, FC Botoșani, Gloria Buzău, Unirea Slobozia).
-
----
-
-## 5. Etape de Verificare
-
-- [ ] Verificare pornire aplicație în stare neautentificată (afișare ecran Login/Register).
-- [ ] Testare înregistrare utilizator nou și salvare profil în Firestore.
-- [ ] Testare creare ligă cu parametri personalizați și alăturare via cod de invitație.
-- [ ] Verificare tab „Club” ca pagină principală cu valoare lot, număr jucători și news feed transferuri.
-- [ ] Verificare ecran „Echipa” (absența duplicatelor de puncte/valoare, prezența selectorului de formație și mărimii lotului).
-- [ ] Verificare acces Admin & Bază de Date: accesibil **strict** prin Creator OS (PIN 1923), absent din header.
-- [ ] Verificare test API Sofascore & Opta cu transpunere directă în puncte conform Scoring Engine.
-- [ ] Rulare `npm run lint` și `compile_applet`.
+#### Etape de Implementare:
+1. **Curățare Tipuri de Date (`src/types/football.ts`)**:
+   - Păstrarea câmpurilor esențiale (`id`, `name`, `clubId`, `position`, `nationality`, `avatar`, `marketValue`, `pointsTotal`).
+   - Eliminarea structurilor complexe de sub-statistici manuale.
+2. **Optimizare Roster Bază de Date (`src/data/superligaAll16ClubsPlayers.ts`)**:
+   - Streamline la loturile celor 16 cluburi oficiale pe structura curată.
+3. **Adaptare Formular & Navigator (`src/components/creator/DatabaseNavigatorView.tsx`)**:
+   - Eliminarea din formular a câmpurilor inutile (statistici de meci, motive medicale etc.).
+   - Menținerea stilului de interfață apreciat de utilizator, focusat pe cele 6 elemente esențiale.
+4. **Verificare Sincronizare Firestore (`src/lib/firebase.ts` & `src/context/FantasyContext.tsx`)**:
+   - Asigurarea că `saveGlobalPlayerEdit` persistă fidel cele 6 atribute în documentul Firestore și le injectează în state-ul global al tuturor utilizatorilor.
+5. **Validare & Compilare**:
+   - Rularea `compile_applet` și `lint_applet` pentru integritate totală TypeScript.

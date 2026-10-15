@@ -103,7 +103,7 @@ export const PlayerDetailModal: React.FC<PlayerDetailModalProps> = ({ player, on
         { matchday: 5, opponentClubId: 'farul', result: '2-2', minutesPlayed: 0, points: 0, goals: 0, assists: 0, rating: 0, eventsSummary: 'Rezervă neutilizată (0p)' },
         { matchday: 4, opponentClubId: 'uta', result: '2-1', minutesPlayed: 90, points: 24, goals: 1, assists: 0, rating: 7.9, eventsSummary: '1 gol din acțiune' },
         { matchday: 3, opponentClubId: 'hermannstadt', result: '1-1', minutesPlayed: 78, points: 16, goals: 0, assists: 0, rating: 7.1, eventsSummary: '3 recuperări minge' },
-        { matchday: 2, opponentClubId: 'buzau', result: '3-0', minutesPlayed: 90, points: 54, goals: 2, assists: 1, rating: 9.4, eventsSummary: '2 goluri, 1 assist, omul meciului' },
+        { matchday: 2, opponentClubId: 'corvinul', result: '3-0', minutesPlayed: 90, points: 54, goals: 2, assists: 1, rating: 9.4, eventsSummary: '2 goluri, 1 assist, omul meciului' },
         { matchday: 1, opponentClubId: 'botosani', result: '1-0', minutesPlayed: 45, points: 12, goals: 0, assists: 0, rating: 6.2, eventsSummary: 'Intrat la pauză, prestație modestă' },
       ].slice(0, 10);
 

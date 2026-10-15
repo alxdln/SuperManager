@@ -1,5 +1,54 @@
 {
   "entities": {
+    "GlobalPlayer": {
+      "title": "GlobalPlayer",
+      "description": "Fotbalist din baza de date globală Superliga cu cele 6 atribute esențiale",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID unic jucător"
+        },
+        "name": {
+          "type": "string",
+          "description": "Numele complet al fotbalistului",
+          "maxLength": 100
+        },
+        "clubId": {
+          "type": "string",
+          "description": "ID-ul clubului din Superliga",
+          "maxLength": 50
+        },
+        "position": {
+          "type": "string",
+          "description": "Poziția fotbalistului (GK, DEF, MID, FWD)",
+          "enum": ["GK", "DEF", "MID", "FWD"]
+        },
+        "nationality": {
+          "type": "string",
+          "description": "Naționalitatea fotbalistului",
+          "maxLength": 50
+        },
+        "avatar": {
+          "type": "string",
+          "description": "URL avatar sau poză fotbalist",
+          "maxLength": 500
+        },
+        "marketValue": {
+          "type": "number",
+          "description": "Cota Transfermarkt de piață în euro"
+        },
+        "pointsTotal": {
+          "type": "number",
+          "description": "Punctajul fantasy total acumulat calculat automat"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp actualizare document"
+        }
+      },
+      "required": ["id", "name", "clubId", "position", "nationality", "avatar", "marketValue"]
+    },
     "CustomPlayer": {
       "title": "CustomPlayer",
       "description": "Jucător adăugat manual în baza de date pentru teste și extindere loturi",
@@ -24,6 +73,16 @@
           "description": "Poziția fotbalistului (GK, DEF, MID, FWD)",
           "enum": ["GK", "DEF", "MID", "FWD"]
         },
+        "nationality": {
+          "type": "string",
+          "description": "Naționalitatea fotbalistului",
+          "maxLength": 50
+        },
+        "avatar": {
+          "type": "string",
+          "description": "URL avatar sau poză fotbalist",
+          "maxLength": 500
+        },
         "marketValue": {
           "type": "number",
           "description": "Cota de piață în euro"
@@ -32,32 +91,42 @@
           "type": "number",
           "description": "Punctajul total acumulat"
         },
-        "pointsMatchday": {
-          "type": "number",
-          "description": "Punctajul din etapa curentă"
-        },
-        "avatar": {
+        "updatedAt": {
           "type": "string",
-          "description": "URL avatar sau poză fotbalist",
-          "maxLength": 500
-        },
-        "nationality": {
-          "type": "string",
-          "description": "Naționalitatea fotbalistului",
-          "maxLength": 50
-        },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp creare document"
+          "description": "Timestamp actualizare document"
         }
       },
-      "required": ["id", "name", "clubId", "position", "marketValue"]
+      "required": ["id", "name", "clubId", "position", "nationality", "avatar", "marketValue"]
+    },
+    "DeletedPlayer": {
+      "title": "DeletedPlayer",
+      "description": "ID-ul fotbaliștilor eliminați definitiv din baza de date a jocului",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID-ul fotbalistului eliminat"
+        },
+        "deletedAt": {
+          "type": "string",
+          "description": "Timestamp-ul ștergerii fotbalistului"
+        }
+      },
+      "required": ["id"]
     }
   },
   "firestore": {
+    "/all_players/{playerId}": {
+      "schema": "GlobalPlayer",
+      "description": "Colecția de jucători oficiali editați și persistați global în Firestore"
+    },
     "/custom_players/{playerId}": {
       "schema": "CustomPlayer",
       "description": "Colecția de jucători personalizați salvați în cloud Firestore"
+    },
+    "/deleted_players/{playerId}": {
+      "schema": "DeletedPlayer",
+      "description": "Colecția de jucători eliminați definitiv din joc pentru sincronizare globală"
     }
   }
 }
