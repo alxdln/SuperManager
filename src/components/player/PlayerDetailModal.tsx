@@ -3,6 +3,7 @@ import { Player, MatchHistoryItem } from '../../types/football';
 import { SUPERLIGA_CLUBS } from '../../data/superligaData';
 import { formatCurrency, getPositionBadge, calculatePlayerRating } from '../../utils/scoringEngine';
 import { useFantasy } from '../../context/FantasyContext';
+import { getPlayerDisplayAvatar } from '../../utils/playerAvatar';
 import {
   X,
   ChevronLeft,
@@ -59,7 +60,7 @@ const getPerformanceColorTier = (points: number) => {
 };
 
 export const PlayerDetailModal: React.FC<PlayerDetailModalProps> = ({ player, onClose, onOpenAuction }) => {
-  const { squad, setCaptain, squadCount, gkCount } = useFantasy();
+  const { user, squad, setCaptain, squadCount, gkCount } = useFantasy();
 
   // Mobile swipe-back gesture state
   const [dragX, setDragX] = useState(0);
@@ -214,7 +215,7 @@ export const PlayerDetailModal: React.FC<PlayerDetailModalProps> = ({ player, on
             {/* 50% Width Centered Showcase Photo */}
             <div className="relative w-1/2 max-w-[200px] aspect-square mx-auto">
               <img
-                src={player.avatar}
+                src={getPlayerDisplayAvatar(player, user.membership)}
                 alt={player.name}
                 className="w-full h-full rounded-3xl object-cover border-4 border-slate-700/90 shadow-2xl bg-slate-950"
                 referrerPolicy="no-referrer"

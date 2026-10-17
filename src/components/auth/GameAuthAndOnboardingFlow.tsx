@@ -22,9 +22,10 @@ import confetti from 'canvas-confetti';
 
 interface GameAuthAndOnboardingFlowProps {
   onComplete: () => void;
+  onCreatorLogin?: () => void;
 }
 
-export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps> = ({ onComplete }) => {
+export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps> = ({ onComplete, onCreatorLogin }) => {
   const {
     user,
     isAuthenticated,
@@ -34,25 +35,15 @@ export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps>
     createNewLeague,
     joinLeagueByCode,
     leagueSettings,
+    leagueMembers,
     players,
+    activeClubs,
+    squad,
     allocateStarterSquad,
   } = useFantasy();
 
   // Internal Step: 1 = Auth, 2 = Create/Join League, 3 = Invite Friends, 4 = Starter Squad Reveal (14 Players / €5M)
   const [step, setStep] = useState<1 | 2 | 3 | 4>(() => (!isAuthenticated ? 1 : !user.starterPackClaimed ? 4 : 2));
-
-  // Pre-generate starter squad of 14 players
-  const randomStarterSquad = useMemo(() => {
-    return generateRandomStarterSquad(players);
-  }, [players]);
-
-  // Step 1: Auth form state
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('register');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [managerName, setManagerName] = useState('');
-  const [teamName, setTeamName] = useState('');
-  const [authError, setAuthError] = useState<string | null>(null);
 
   // Step 2: League mode state
   const [leagueMode, setLeagueMode] = useState<'create' | 'join'>('create');
@@ -61,6 +52,43 @@ export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps>
   const [maxSameClubPlayers, setMaxSameClubPlayers] = useState<number>(3);
   const [joinLeagueCodeInput, setJoinLeagueCodeInput] = useState('');
   const [leagueError, setLeagueError] = useState<string | null>(null);
+
+  // Collect all player IDs already assigned to any member in this league (prevents duplicates)
+  const assignedLeaguePlayerIds = useMemo(() => {
+    const ids = new Set<string>();
+    leagueMembers.forEach((m) => {
+      m.startingLineup?.forEach((s) => {
+        if (s.playerId) ids.add(s.playerId);
+      });
+    });
+    Object.values(squad.startingSlots).forEach((id) => {
+      if (id) ids.add(id);
+    });
+    squad.benchPlayerIds.forEach((id) => {
+      if (id) ids.add(id);
+    });
+    return ids;
+  }, [leagueMembers, squad]);
+
+  // Pre-generate starter squad of 14 players respecting:
+  // 1. maxSameClubPlayers limit from league settings
+  // 2. Unassigned non-duplicate players
+  // 3. Only active clubs
+  const randomStarterSquad = useMemo(() => {
+    return generateRandomStarterSquad(players, {
+      maxSameClubPlayers: leagueSettings?.maxSameClubPlayers || maxSameClubPlayers || 3,
+      assignedPlayerIds: assignedLeaguePlayerIds,
+      activeClubIds: activeClubs.map((c) => c.id),
+    });
+  }, [players, leagueSettings?.maxSameClubPlayers, maxSameClubPlayers, assignedLeaguePlayerIds, activeClubs]);
+
+  // Step 1: Auth form state
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('register');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [managerName, setManagerName] = useState('');
+  const [teamName, setTeamName] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Step 3: Invite state
   const [copiedCode, setCopiedCode] = useState(false);
@@ -95,6 +123,14 @@ export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps>
     } else {
       const res = await login(email, password);
       if (res.success) {
+        if (res.isCreator) {
+          if (onCreatorLogin) {
+            onCreatorLogin();
+          } else {
+            onComplete();
+          }
+          return;
+        }
         // If user already has a league configured, complete immediately, else go to step 2
         if (res.hasLeague) {
           onComplete();
@@ -347,6 +383,25 @@ export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps>
                   />
                 </div>
               </div>
+
+              {authMode === 'login' && (
+                <div className="p-2.5 bg-indigo-950/40 border border-indigo-500/30 rounded-xl flex items-center justify-between gap-2 text-[11px]">
+                  <div>
+                    <span className="font-bold text-indigo-300 block">Creator &amp; Commissioner OS</span>
+                    <span className="text-slate-400 font-mono text-[10px]">creator@supermanager.ro • 1923</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('creator@supermanager.ro');
+                      setPassword('1923');
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 font-bold text-[10px] border border-indigo-500/40 shrink-0"
+                  >
+                    Completează
+                  </button>
+                </div>
+              )}
 
               {authError && (
                 <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold">

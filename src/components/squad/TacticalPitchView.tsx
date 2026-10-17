@@ -19,6 +19,7 @@ import {
   Shield,
 } from 'lucide-react';
 import { SUPERLIGA_CLUBS } from '../../data/superligaData';
+import { getPlayerDisplayAvatar } from '../../utils/playerAvatar';
 
 export const TacticalPitchView: React.FC = () => {
   const {
@@ -56,8 +57,28 @@ export const TacticalPitchView: React.FC = () => {
   const currentFormationConfig = FORMATIONS[squad.formation];
   const playerMap = new Map(players.map((p) => [p.id, p]));
 
-  // Bench players
-  const benchPlayers = squad.benchPlayerIds
+  // Active formation slot IDs and current starters
+  const activeSlotIds = new Set(currentFormationConfig?.slots.map((s) => s.slotId) || []);
+  const starterIds = new Set(
+    Object.entries(squad.startingSlots)
+      .filter(([sId, pId]) => activeSlotIds.has(sId) && Boolean(pId))
+      .map(([_, pId]) => pId as string)
+  );
+
+  // Bench players:
+  // 1. Players in squad.benchPlayerIds (excluding active starters)
+  // 2. Any player whose slot key is outside current active formation
+  const benchIds = new Set<string>();
+  squad.benchPlayerIds.forEach((id) => {
+    if (id && !starterIds.has(id)) benchIds.add(id);
+  });
+  Object.entries(squad.startingSlots).forEach(([sId, pId]) => {
+    if (pId && !activeSlotIds.has(sId) && !starterIds.has(pId)) {
+      benchIds.add(pId);
+    }
+  });
+
+  const benchPlayers = Array.from(benchIds)
     .map((id) => playerMap.get(id))
     .filter(Boolean) as Player[];
 
@@ -253,7 +274,7 @@ export const TacticalPitchView: React.FC = () => {
                   <div className="relative z-10 w-10 h-10 sm:w-11 sm:h-11">
                     <div className="w-full h-full rounded-full p-0.5 bg-gradient-to-b from-white/90 to-slate-800 shadow-xl border-2 border-slate-900/80 overflow-hidden group-hover:scale-105 transition-transform">
                       <img
-                        src={player.avatar}
+                        src={getPlayerDisplayAvatar(player, user.membership)}
                         alt={player.name}
                         className="w-full h-full object-cover rounded-full bg-slate-950"
                         onError={(e) => {
@@ -387,7 +408,7 @@ export const TacticalPitchView: React.FC = () => {
                   {/* Photo 50% width of card */}
                   <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-slate-700 shadow-md bg-slate-900 group-hover:scale-105 transition-transform shrink-0">
                     <img
-                      src={player.avatar}
+                      src={getPlayerDisplayAvatar(player, user.membership)}
                       alt={player.name}
                       className="w-full h-full object-cover"
                       onError={(e) => {

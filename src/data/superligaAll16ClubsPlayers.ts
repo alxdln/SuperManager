@@ -1663,14 +1663,46 @@ export const ALL_16_SUPERLIGA_PLAYERS_ENRICHED: Player[] = ALL_16_SUPERLIGA_PLAY
  * (minim 1 portar, maxim 2 portari, minim 4 fundași, minim 3 mijlocași, minim 2 atacanți)
  * Valoare totală a pachetului calibrată la aproximativ 5 milioane de euro (€5.00M).
  */
-export function generateRandomStarterSquad(sourcePlayers?: Player[]): Player[] {
-  const pool = (sourcePlayers && sourcePlayers.length > 20 ? sourcePlayers : ALL_16_SUPERLIGA_PLAYERS_ENRICHED);
+export interface StarterSquadGenerationOptions {
+  maxSameClubPlayers?: number;
+  assignedPlayerIds?: Set<string> | string[];
+  activeClubIds?: Set<string> | string[];
+}
 
-  // Group by position
-  const gks = pool.filter((p) => p.position === 'GK');
-  const defs = pool.filter((p) => p.position === 'DEF');
-  const mids = pool.filter((p) => p.position === 'MID');
-  const fwds = pool.filter((p) => p.position === 'FWD');
+/**
+ * Generator de pachet de debut: 14 jucători echilibrați pe posturi
+ * (1 portar, 5 fundași, 5 mijlocași, 3 atacanți)
+ * Valoare totală calibrată la ~€5.00M.
+ * Respectă strict:
+ * 1. Niciun fotbalist duplicat (exclude assignedPlayerIds din ligă)
+ * 2. Limita maximă per club configurată în ligă (maxSameClubPlayers)
+ * 3. Ignoră cluburile inactive din Master Database
+ */
+export function generateRandomStarterSquad(
+  sourcePlayers?: Player[],
+  options?: StarterSquadGenerationOptions
+): Player[] {
+  const maxClubLimit = options?.maxSameClubPlayers && options.maxSameClubPlayers > 0 ? options.maxSameClubPlayers : 3;
+  const assignedSet = new Set<string>(
+    options?.assignedPlayerIds
+      ? (Array.isArray(options.assignedPlayerIds) ? options.assignedPlayerIds : Array.from(options.assignedPlayerIds))
+      : []
+  );
+  const activeClubSet = options?.activeClubIds
+    ? new Set<string>(Array.isArray(options.activeClubIds) ? options.activeClubIds : Array.from(options.activeClubIds))
+    : null;
+
+  const rawPool = (sourcePlayers && sourcePlayers.length > 20 ? sourcePlayers : ALL_16_SUPERLIGA_PLAYERS_ENRICHED);
+
+  // 1. Filter out assigned players and inactive club players
+  const availablePool = rawPool.filter((p) => {
+    if (assignedSet.has(p.id)) return false;
+    if (activeClubSet && !activeClubSet.has(p.clubId)) return false;
+    return true;
+  });
+
+  // Fallback to rawPool if available is too small for a 14 player squad
+  const pool = availablePool.length >= 14 ? availablePool : rawPool;
 
   // Shuffle helper
   const shuffle = <T>(arr: T[]): T[] => {
@@ -1682,51 +1714,65 @@ export function generateRandomStarterSquad(sourcePlayers?: Player[]): Player[] {
     return copy;
   };
 
-  // Target composition: 1 GK, 5 DEF, 5 MID, 3 FWD = exactly 14 players
-  // Target average player value: ~€350,000 (€350k * 14 = €4,900,000 ~ €5.00M)
-  // We prefer players with values between €150,000 and €750,000 to keep the sum near ~5.00M
-  const pickFromTier = (candidates: Player[], count: number, targetSum: number): Player[] => {
-    const sorted = shuffle(candidates);
-    // Try to pick players whose average is close to targetSum / count
-    const selected: Player[] = [];
-    const usedIds = new Set<string>();
+  // Group by position
+  const gks = pool.filter((p) => p.position === 'GK');
+  const defs = pool.filter((p) => p.position === 'DEF');
+  const mids = pool.filter((p) => p.position === 'MID');
+  const fwds = pool.filter((p) => p.position === 'FWD');
 
-    // First filter reasonable starter values (under €1M)
-    const affordable = sorted.filter((p) => p.marketValue <= 1000000);
-    const fallbackPool = affordable.length >= count ? affordable : sorted;
+  const selected: Player[] = [];
+  const usedIds = new Set<string>();
+  const clubCounts: Record<string, number> = {};
 
-    for (const p of fallbackPool) {
+  const pickPlayers = (candidates: Player[], count: number) => {
+    const shuffled = shuffle(candidates);
+    const affordable = shuffled.filter((p) => p.marketValue <= 1000000);
+    const sortedPool = [...affordable, ...shuffled.filter((p) => p.marketValue > 1000000)];
+
+    // First pass: strictly enforce maxSameClubPlayers & unassigned
+    for (const p of sortedPool) {
       if (selected.length < count && !usedIds.has(p.id)) {
-        selected.push(p);
-        usedIds.add(p.id);
+        const curClubCount = clubCounts[p.clubId] || 0;
+        if (curClubCount < maxClubLimit) {
+          selected.push(p);
+          usedIds.add(p.id);
+          clubCounts[p.clubId] = curClubCount + 1;
+        }
       }
     }
-    return selected;
+
+    // Second pass fallback if not enough players due to strict club limit
+    if (selected.length < count) {
+      for (const p of sortedPool) {
+        if (selected.length < count && !usedIds.has(p.id)) {
+          selected.push(p);
+          usedIds.add(p.id);
+          clubCounts[p.clubId] = (clubCounts[p.clubId] || 0) + 1;
+        }
+      }
+    }
   };
 
-  // 1 GK (budget ~€400,000)
-  const pickedGk = pickFromTier(gks, 1, 400000);
-  // 5 DEF (budget ~€1,750,000)
-  const pickedDef = pickFromTier(defs, 5, 1750000);
-  // 5 MID (budget ~€1,850,000)
-  const pickedMid = pickFromTier(mids, 5, 1850000);
-  // 3 FWD (budget ~€1,000,000)
-  const pickedFwd = pickFromTier(fwds, 3, 1000000);
+  // 1 GK, 5 DEF, 5 MID, 3 FWD = 14 total
+  pickPlayers(gks, 1);
+  const targetDefCount = selected.length + 5;
+  pickPlayers(defs, targetDefCount);
+  const targetMidCount = selected.length + 5;
+  pickPlayers(mids, targetMidCount);
+  const targetFwdCount = selected.length + 3;
+  pickPlayers(fwds, targetFwdCount);
 
-  const squad = [...pickedGk, ...pickedDef, ...pickedMid, ...pickedFwd];
-
-  // If squad is less than 14 for any edge case, fill with random unique
-  if (squad.length < 14) {
-    const used = new Set(squad.map((p) => p.id));
+  // If still under 14 players, fill with any unique unassigned from pool
+  if (selected.length < 14) {
     for (const p of shuffle(pool)) {
-      if (!used.has(p.id)) {
-        squad.push(p);
-        used.add(p.id);
-        if (squad.length === 14) break;
+      if (!usedIds.has(p.id)) {
+        selected.push(p);
+        usedIds.add(p.id);
+        if (selected.length === 14) break;
       }
     }
   }
 
-  return squad.slice(0, 14);
+  return selected.slice(0, 14);
 }
 

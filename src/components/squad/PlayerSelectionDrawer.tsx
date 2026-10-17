@@ -4,6 +4,7 @@ import { useFantasy } from '../../context/FantasyContext';
 import { getPositionBadge, formatCurrency } from '../../utils/scoringEngine';
 import { X, UserMinus, ShieldAlert, Check, AlertTriangle } from 'lucide-react';
 import { SUPERLIGA_CLUBS } from '../../data/superligaData';
+import { getPlayerDisplayAvatar } from '../../utils/playerAvatar';
 
 interface PlayerSelectionDrawerProps {
   slotId: string;
@@ -29,7 +30,7 @@ export const PlayerSelectionDrawer: React.FC<PlayerSelectionDrawerProps> = ({
   onSelectPlayer,
   onRemovePlayer,
 }) => {
-  const { players, squad } = useFantasy();
+  const { user, players, squad } = useFantasy();
 
   const posFullName = fullPosLabel[requiredPosition];
 
@@ -144,7 +145,7 @@ export const PlayerSelectionDrawer: React.FC<PlayerSelectionDrawerProps> = ({
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <img
-                      src={player.avatar}
+                      src={getPlayerDisplayAvatar(player, user.membership)}
                       alt={player.name}
                       className="w-11 h-11 rounded-2xl object-cover shrink-0 border border-slate-700"
                       onError={(e) => {

@@ -7,9 +7,10 @@ export interface Club {
   city: string;
   logoColor: string;
   secondaryColor: string;
-  badgeText: string;
+  badgeText?: string;
   stadium: string;
   logoUrl?: string;
+  isActive?: boolean;
 }
 
 export interface PlayerStats {
@@ -283,11 +284,14 @@ export interface LeagueMember {
   gameweekHistory?: MemberGameweekHistoryItem[];
 }
 
+export type UserMembership = 'gratuit' | 'pro' | 'admin' | 'creator';
+
 export interface LeagueSettings {
   leagueName: string;
   leagueCode: string;
   startingBudget: number;
   maxSquadSize: number;
+  maxSameClubPlayers?: number;
   allowMemberAuctions: boolean;
   transferWindowOpen: boolean;
 }
@@ -313,4 +317,6 @@ export interface UserProfile {
   checkinsCount: number;
   leagueId?: string;
   starterPackClaimed?: boolean;
+  membership?: UserMembership;
 }
+

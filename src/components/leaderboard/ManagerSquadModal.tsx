@@ -4,6 +4,7 @@ import { useFantasy } from '../../context/FantasyContext';
 import { SUPERLIGA_CLUBS } from '../../data/superligaData';
 import { formatCurrency, getPositionBadge } from '../../utils/scoringEngine';
 import { PlayerDetailModal } from '../player/PlayerDetailModal';
+import { getPlayerDisplayAvatar } from '../../utils/playerAvatar';
 import { X, Trophy, Flame, Award, Shield, User } from 'lucide-react';
 
 interface ManagerSquadModalProps {
@@ -126,7 +127,7 @@ export const ManagerSquadModal: React.FC<ManagerSquadModalProps> = ({ member, on
                     {player ? (
                       <div className="relative shrink-0">
                         <img
-                          src={player.avatar}
+                          src={getPlayerDisplayAvatar(player, user.membership)}
                           alt={player.name}
                           className="w-9 h-9 rounded-xl object-cover border border-slate-700 bg-slate-950"
                           onError={(e) => {

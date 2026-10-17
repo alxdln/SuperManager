@@ -12,6 +12,7 @@ import { NotificationsModal } from './NotificationsModal';
 import { AuthAndSettingsModal } from '../auth/AuthAndSettingsModal';
 import { AdminDashboardModal } from '../admin/AdminDashboardModal';
 import { formatCurrency } from '../../utils/scoringEngine';
+import { SplashScreen } from './SplashScreen';
 import {
   Shield,
   Users,
@@ -33,6 +34,7 @@ import {
 export const MobileShell: React.FC = () => {
   const { user, isAuthenticated, unreadNotificationsCount, isLiveMatchWindow, squadPointsMatchday } = useFantasy();
 
+  const [showSplash, setShowSplash] = useState(true);
   const [activeTab, setActiveTab] = useState<'club' | 'squad' | 'live' | 'market' | 'leaderboard' | 'hub'>('club');
   const [isIPhoneFrame, setIsIPhoneFrame] = useState(true);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -41,9 +43,19 @@ export const MobileShell: React.FC = () => {
   const [adminInitialTab, setAdminInitialTab] = useState<'addPlayer' | 'managePlayers' | 'leagueSettings' | 'databaseAndApis'>('databaseAndApis');
   const [isCreatorMode, setIsCreatorMode] = useState(false);
 
+  // Animated Splash Screen (2 seconds with game logo & smooth fade)
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+  }
+
   // If user is not logged in or has not finished onboarding (including 14-player starter squad allocation)
   if (!isAuthenticated || !user.starterPackClaimed) {
-    return <GameAuthAndOnboardingFlow onComplete={() => setActiveTab('club')} />;
+    return (
+      <GameAuthAndOnboardingFlow
+        onComplete={() => setActiveTab('club')}
+        onCreatorLogin={() => setIsCreatorMode(true)}
+      />
+    );
   }
 
   if (isCreatorMode) {
@@ -129,8 +141,18 @@ export const MobileShell: React.FC = () => {
             <div className="min-w-0">
               <h1 className="text-xs font-black text-white tracking-tight truncate flex items-center gap-1">
                 <span>SuperManager</span>
-                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  PRO
+                <span
+                  className={`text-[9px] font-bold px-1.5 py-0.2 rounded border uppercase font-mono ${
+                    user.membership === 'creator'
+                      ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
+                      : user.membership === 'admin'
+                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                      : user.membership === 'pro'
+                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                      : 'bg-slate-700/40 text-slate-400 border-slate-600/40'
+                  }`}
+                >
+                  {user.membership || 'GRATUIT'}
                 </span>
               </h1>
               <span className="text-[11px] text-slate-400 truncate block">
@@ -141,6 +163,18 @@ export const MobileShell: React.FC = () => {
 
           {/* Quick budget & Notification actions */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Creator OS shortcut button for creator account */}
+            {user.membership === 'creator' && (
+              <button
+                onClick={() => setIsCreatorMode(true)}
+                className="py-1 px-2 rounded-xl bg-indigo-950/80 border border-indigo-500/50 hover:bg-indigo-900/80 text-indigo-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
+                title="Deschide Creator & Commissioner OS"
+              >
+                <Database className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="text-[10px] hidden sm:inline">Creator OS</span>
+              </button>
+            )}
+
             {/* Quick budget chip */}
             <div
               onClick={() => setActiveTab('market')}

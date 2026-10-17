@@ -201,12 +201,36 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
                 alt={user.name}
                 className="w-12 h-12 rounded-full object-cover border-2 border-emerald-400"
               />
-              <div>
-                <span className="text-sm font-bold text-white block">{user.name}</span>
-                <span className="text-slate-400 block">{user.email}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-bold text-white">{user.name}</span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase border ${
+                      user.membership === 'creator'
+                        ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
+                        : user.membership === 'admin'
+                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                        : user.membership === 'pro'
+                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                        : 'bg-slate-700/50 text-slate-300 border-slate-600'
+                    }`}
+                  >
+                    Nivel: {user.membership || 'gratuit'}
+                  </span>
+                </div>
+                <span className="text-slate-400 block text-[11px] truncate">{user.email}</span>
                 <span className="text-emerald-400 font-mono text-[11px] block mt-0.5">
                   Buget Curent: {formatFullCurrency(user.budget)}
                 </span>
+                <p className="text-[10px] text-slate-400 mt-1 italic">
+                  {user.membership === 'pro'
+                    ? '★ Cont PRO activ: Poze reale ale jucătorilor și acces la flux live în timp real.'
+                    : user.membership === 'creator'
+                    ? '★ Cont Creator: Acces total la Master Database și unelte commissioner.'
+                    : user.membership === 'admin'
+                    ? '★ Cont Admin: Poți gestiona setările ligii tale și membrii.'
+                    : 'Cont Gratuit: Avatare gri și puncte afișate la finalul etapei.'}
+                </p>
               </div>
             </div>
 

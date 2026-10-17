@@ -17,9 +17,11 @@ import {
   LeagueNewsArticle,
   MatchEventType,
   PlayerStats,
+  Club,
+  UserMembership,
 } from '../types/football';
 import { INITIAL_PLAYERS, INITIAL_FIXTURES, INITIAL_LEAGUE_NEWS } from '../data/superligaData';
-import { ALL_16_SUPERLIGA_PLAYERS } from '../data/superligaAll16ClubsPlayers';
+import { ALL_16_SUPERLIGA_PLAYERS, ALL_16_SUPERLIGA_CLUBS } from '../data/superligaAll16ClubsPlayers';
 import { FORMATIONS } from '../data/formations';
 import { calculateEventPoints, formatCurrency, formatFullCurrency } from '../utils/scoringEngine';
 import {
@@ -33,6 +35,10 @@ import {
   deleteGlobalPlayer,
   loadFirestoreGlobalPlayers,
   loadFirestoreDeletedPlayerIds,
+  loadFirestoreClubs,
+  saveFirestoreClub,
+  updateFirestoreClub,
+  toggleFirestoreClubStatus,
 } from '../lib/firebase';
 
 interface FantasyContextType {
@@ -40,11 +46,20 @@ interface FantasyContextType {
   user: UserProfile;
   isAuthenticated: boolean;
   registerUserAccount: (accountData: { email: string; password?: string; name: string; teamName: string }) => Promise<{ success: boolean; message: string }>;
-  login: (email: string, pass: string) => Promise<{ success: boolean; hasLeague: boolean; message?: string }>;
+  login: (email: string, pass: string) => Promise<{ success: boolean; hasLeague: boolean; isCreator?: boolean; message?: string }>;
   loginWithProvider: (provider: 'apple' | 'google') => void;
   logout: () => void;
   updateUserTeamName: (newName: string) => void;
   updateUserPassword: (password: string) => boolean;
+  updateUserMembership: (membership: UserMembership) => void;
+
+  // Clubs Master State & Management
+  clubs: Club[];
+  activeClubs: Club[];
+  allPlayers: Player[];
+  updateClub: (club: Club) => Promise<boolean>;
+  addNewClub: (clubData: Omit<Club, 'id'> & { id?: string }) => Promise<boolean>;
+  toggleClubStatus: (clubId: string, isActive: boolean) => Promise<boolean>;
 
   // League Creation & Join
   createNewLeague: (data: { name: string; startingBudget: number; maxSameClubPlayers: number }) => Promise<{ success: boolean; message: string }>;
@@ -166,6 +181,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       budget: 50000000, // €50M
       fanCoins: 1250,
       checkinsCount: 3,
+      membership: 'gratuit',
     };
   });
 
@@ -173,8 +189,42 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return localStorage.getItem(`${STORAGE_KEY}_auth`) === 'true';
   });
 
-  // All Players List (All 16 Liga 1 Clubs - Official 2026/2027)
-  const [players, setPlayers] = useState<Player[]>(() => {
+  // =========================================================================
+  // CLUBS MASTER STATE (All 16 Liga 1 Clubs + Dynamic Additions / Deactivations)
+  // =========================================================================
+  const [clubs, setClubs] = useState<Club[]>(() => {
+    const local = (() => {
+      try {
+        const stored = localStorage.getItem('supermanager_db_clubs');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (typeof parsed === 'object' && parsed !== null) {
+            return Object.values(parsed) as Club[];
+          }
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      return [];
+    })();
+
+    const clubMap = new Map<string, Club>();
+    ALL_16_SUPERLIGA_CLUBS.forEach((c) => {
+      clubMap.set(c.id, { ...c, isActive: true });
+    });
+    local.forEach((c) => {
+      if (c && c.id) {
+        clubMap.set(c.id, { ...c, isActive: c.isActive !== false });
+      }
+    });
+    return Array.from(clubMap.values());
+  });
+
+  const activeClubs = useMemo(() => clubs.filter((c) => c.isActive !== false), [clubs]);
+  const activeClubIds = useMemo(() => new Set(activeClubs.map((c) => c.id)), [activeClubs]);
+
+  // All Players Master List (persisted and stored across sessions)
+  const [masterPlayers, setMasterPlayers] = useState<Player[]>(() => {
     // 1. Get cached deleted player IDs (tombstones)
     const localDeleted = (() => {
       try {
@@ -202,23 +252,30 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     })();
 
-    // 4. Load base saved list or ALL_16_SUPERLIGA_PLAYERS
-    let baseList: Player[] = ALL_16_SUPERLIGA_PLAYERS;
+    // 4. Merge base players from ALL_16_SUPERLIGA_PLAYERS and INITIAL_PLAYERS
+    const map = new Map<string, Player>();
+    ALL_16_SUPERLIGA_PLAYERS.forEach((p) => {
+      if (p && p.id) map.set(p.id, p);
+    });
+    INITIAL_PLAYERS.forEach((p) => {
+      if (p && p.id && !map.has(p.id)) map.set(p.id, p);
+    });
+
     const saved = localStorage.getItem(`${STORAGE_KEY}_players`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length >= 20) {
-          baseList = parsed;
+          parsed.forEach((p) => {
+            if (p && p.id) {
+              const exist = map.get(p.id);
+              map.set(p.id, exist ? { ...exist, ...p } : p);
+            }
+          });
         }
       } catch (e) { /* ignore */ }
     }
 
-    // Merge base with custom players
-    const map = new Map<string, Player>();
-    baseList.forEach((p) => {
-      if (p && p.id) map.set(p.id, p);
-    });
     localCustom.forEach((p) => {
       if (p && p.id) {
         const exist = map.get(p.id);
@@ -237,13 +294,73 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return result;
   });
 
+  // Alias setPlayers to setMasterPlayers to maintain 100% backward compatibility
+  const setPlayers = setMasterPlayers;
+
+  // Players visible in entire game (automatically hides players belonging to deactivated clubs)
+  const players = useMemo(() => {
+    return masterPlayers.filter((p) => activeClubIds.has(p.clubId));
+  }, [masterPlayers, activeClubIds]);
+
+  // All players exposed for Master Database management (including inactive clubs)
+  const allPlayers = masterPlayers;
+
+  // Helper to sanitize squad state: cleans obsolete slots and moves stranded players to bench
+  const sanitizeSquad = useCallback((rawSquad: SquadState): SquadState => {
+    const formation = FORMATIONS[rawSquad?.formation] ? rawSquad.formation : '4-3-3';
+    const formationConfig = FORMATIONS[formation];
+    const validSlotIds = new Set(formationConfig.slots.map((s) => s.slotId));
+
+    const cleanStartingSlots: Record<string, string | null> = {};
+    formationConfig.slots.forEach((s) => {
+      cleanStartingSlots[s.slotId] = null;
+    });
+
+    const strandedPlayerIds: string[] = [];
+
+    // Transfer valid slots and collect any players stranded in obsolete slots
+    Object.entries(rawSquad?.startingSlots || {}).forEach(([slotId, playerId]) => {
+      if (playerId) {
+        if (validSlotIds.has(slotId)) {
+          cleanStartingSlots[slotId] = playerId;
+        } else {
+          strandedPlayerIds.push(playerId);
+        }
+      }
+    });
+
+    const startersSet = new Set(Object.values(cleanStartingSlots).filter(Boolean) as string[]);
+
+    // Collect bench players: original bench + any stranded players, deduplicated and excluding active starters
+    const combinedBench = [
+      ...(Array.isArray(rawSquad?.benchPlayerIds) ? rawSquad.benchPlayerIds : []),
+      ...strandedPlayerIds,
+    ];
+
+    const cleanBench: string[] = [];
+    const seenBench = new Set<string>();
+    combinedBench.forEach((id) => {
+      if (id && !startersSet.has(id) && !seenBench.has(id)) {
+        seenBench.add(id);
+        cleanBench.push(id);
+      }
+    });
+
+    return {
+      ...rawSquad,
+      formation,
+      startingSlots: cleanStartingSlots,
+      benchPlayerIds: cleanBench,
+      captainPlayerId: rawSquad?.captainPlayerId && startersSet.has(rawSquad.captainPlayerId)
+        ? rawSquad.captainPlayerId
+        : Array.from(startersSet)[0] || null,
+      boosterActive: Boolean(rawSquad?.boosterActive),
+    };
+  }, []);
+
   // Squad State
   const [squad, setSquad] = useState<SquadState>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_squad`);
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { /* ignore */ }
-    }
-    return {
+    const defaultSquad: SquadState = {
       formation: '4-3-3',
       startingSlots: {
         gk: 'p_tarnovanu',
@@ -262,6 +379,46 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       captainPlayerId: 'p_olaru',
       boosterActive: false,
     };
+
+    const saved = localStorage.getItem(`${STORAGE_KEY}_squad`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          // Inline basic sanitize for initial state
+          const formation = FORMATIONS[parsed.formation as TacticalFormation] ? (parsed.formation as TacticalFormation) : '4-3-3';
+          const validSlotIds = new Set(FORMATIONS[formation].slots.map((s) => s.slotId));
+          const cleanSlots: Record<string, string | null> = {};
+          FORMATIONS[formation].slots.forEach((s) => { cleanSlots[s.slotId] = null; });
+          const stranded: string[] = [];
+
+          Object.entries(parsed.startingSlots || {}).forEach(([slotId, playerId]) => {
+            if (playerId && typeof playerId === 'string') {
+              if (validSlotIds.has(slotId)) {
+                cleanSlots[slotId] = playerId;
+              } else {
+                stranded.push(playerId);
+              }
+            }
+          });
+
+          const starters = new Set(Object.values(cleanSlots).filter(Boolean) as string[]);
+          const bench = Array.from(new Set([
+            ...(Array.isArray(parsed.benchPlayerIds) ? parsed.benchPlayerIds : []),
+            ...stranded,
+          ])).filter((id) => !starters.has(id));
+
+          return {
+            ...parsed,
+            formation,
+            startingSlots: cleanSlots,
+            benchPlayerIds: bench,
+            captainPlayerId: parsed.captainPlayerId || Array.from(starters)[0] || null,
+          };
+        }
+      } catch (e) { /* ignore */ }
+    }
+    return defaultSquad;
   });
 
   // Unified Market Items (League Listings + Member Listings in the same place)
@@ -511,32 +668,76 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.setItem(`${STORAGE_KEY}_settings`, JSON.stringify(leagueSettings));
   }, [leagueSettings]);
 
-  // Synchronize Global Players, Additions & Deletions from Firestore Database across all users
+  // Persist Clubs state to localStorage
+  useEffect(() => {
+    try {
+      const map: Record<string, Club> = {};
+      clubs.forEach((c) => {
+        map[c.id] = c;
+      });
+      localStorage.setItem('supermanager_db_clubs', JSON.stringify(map));
+    } catch (e) {
+      /* ignore */
+    }
+  }, [clubs]);
+
+  // Synchronize Global Players, Additions & Deletions and Clubs from Firestore Database across all users
   useEffect(() => {
     let isMounted = true;
     async function syncGlobalPlayersFromFirestore() {
       try {
-        const [remotePlayers, remoteCustom, remoteDeleted] = await Promise.all([
+        const [remotePlayers, remoteCustom, remoteDeleted, remoteClubs] = await Promise.all([
           loadFirestoreGlobalPlayers(),
           loadFirestoreCustomPlayers(),
           loadFirestoreDeletedPlayerIds(),
+          loadFirestoreClubs(),
         ]);
 
         if (!isMounted) return;
+
+        // Synchronize remote clubs if any exists
+        if (remoteClubs && remoteClubs.length > 0) {
+          setClubs((prev) => {
+            const clubMap = new Map<string, Club>();
+            prev.forEach((c) => clubMap.set(c.id, c));
+            remoteClubs.forEach((c) => {
+              if (c && c.id) {
+                const existing = clubMap.get(c.id);
+                clubMap.set(c.id, existing ? { ...existing, ...c } : c);
+              }
+            });
+            return Array.from(clubMap.values());
+          });
+        }
 
         const deletedSet = new Set(remoteDeleted);
 
         setPlayers((prev) => {
           const map = new Map<string, Player>();
 
-          // 1. Keep non-deleted players from current state
-          prev.forEach((p) => {
+          // Base 1: All 16 Superliga clubs official players
+          ALL_16_SUPERLIGA_PLAYERS.forEach((p) => {
             if (p && p.id && !deletedSet.has(p.id)) {
               map.set(p.id, p);
             }
           });
 
-          // 2. Add or update remote custom players
+          // Base 2: Initial Superliga players (includes Dobre, Baiaram, Postolachi, Siegrist, Pașcanu, Onea, etc.)
+          INITIAL_PLAYERS.forEach((p) => {
+            if (p && p.id && !deletedSet.has(p.id) && !map.has(p.id)) {
+              map.set(p.id, p);
+            }
+          });
+
+          // 3. Keep non-deleted players from current state
+          prev.forEach((p) => {
+            if (p && p.id && !deletedSet.has(p.id)) {
+              const existing = map.get(p.id);
+              map.set(p.id, existing ? { ...existing, ...p } : p);
+            }
+          });
+
+          // 4. Add or update remote custom players
           remoteCustom.forEach((p) => {
             if (p && p.id && !deletedSet.has(p.id)) {
               const existing = map.get(p.id);
@@ -737,14 +938,32 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Squad size and Goalkeeper count (Rules: max 16, min 11, min 1 GK)
   const squadCount = useMemo(() => {
-    const starters = Object.values(squad.startingSlots).filter(Boolean).length;
-    return starters + squad.benchPlayerIds.length;
+    const config = FORMATIONS[squad.formation];
+    const validSlotIds = new Set(config ? config.slots.map((s) => s.slotId) : []);
+    const starters = Object.entries(squad.startingSlots)
+      .filter(([slotId, playerId]) => validSlotIds.has(slotId) && Boolean(playerId))
+      .map(([_, playerId]) => playerId as string);
+    const startersSet = new Set(starters);
+    // Bench players: bench entries + any stranded players from obsolete slots not in active formation
+    const stranded = Object.entries(squad.startingSlots)
+      .filter(([slotId, playerId]) => !validSlotIds.has(slotId) && Boolean(playerId))
+      .map(([_, playerId]) => playerId as string);
+    const allBench = [...squad.benchPlayerIds, ...stranded];
+    const cleanBench = Array.from(new Set(allBench.filter((id) => Boolean(id) && !startersSet.has(id))));
+    return startersSet.size + cleanBench.length;
   }, [squad]);
 
   const gkCount = useMemo(() => {
     const playerMap = new Map(players.map((p) => [p.id, p]));
-    const starters = Object.values(squad.startingSlots).filter(Boolean) as string[];
-    const allIds = Array.from(new Set([...starters, ...squad.benchPlayerIds]));
+    const config = FORMATIONS[squad.formation];
+    const validSlotIds = new Set(config ? config.slots.map((s) => s.slotId) : []);
+    const starters = Object.entries(squad.startingSlots)
+      .filter(([slotId, playerId]) => validSlotIds.has(slotId) && Boolean(playerId))
+      .map(([_, playerId]) => playerId as string);
+    const stranded = Object.entries(squad.startingSlots)
+      .filter(([slotId, playerId]) => !validSlotIds.has(slotId) && Boolean(playerId))
+      .map(([_, playerId]) => playerId as string);
+    const allIds = Array.from(new Set([...starters, ...squad.benchPlayerIds, ...stranded]));
     return allIds.reduce((acc, id) => {
       const p = playerMap.get(id);
       return acc + (p && p.position === 'GK' ? 1 : 0);
@@ -793,6 +1012,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         budget: 50000000,
         fanCoins: 1000,
         checkinsCount: 0,
+        membership: 'gratuit',
       };
 
       setUser(newProfile);
@@ -808,6 +1028,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         teamName: accountData.teamName,
         avatar: defaultAvatar,
         budget: 50000000,
+        membership: 'gratuit',
         createdAt: new Date().toISOString(),
       });
 
@@ -823,10 +1044,47 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const login = async (email: string, _pass: string): Promise<{ success: boolean; hasLeague: boolean; message?: string }> => {
+  const login = async (
+    email: string,
+    _pass: string
+  ): Promise<{ success: boolean; hasLeague: boolean; isCreator?: boolean; message?: string }> => {
     try {
-      const stored = await findFirestoreUser(email);
+      const cleanEmail = email.trim().toLowerCase();
+      const cleanPass = _pass.trim();
+
+      // DIRECT CREATOR & COMMISSIONER OS ACCESS (creator@supermanager.ro / 1923)
+      if (cleanEmail === 'creator@supermanager.ro' && cleanPass === '1923') {
+        const creatorProfile: UserProfile = {
+          id: 'usr_creator',
+          name: 'SuperManager Creator',
+          email: 'creator@supermanager.ro',
+          teamName: 'Commissioner HQ',
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+          favoriteClubId: 'fcsb',
+          budget: 100000000,
+          fanCoins: 99999,
+          checkinsCount: 10,
+          leagueId: 'lg_superliga_official_2026',
+          starterPackClaimed: true,
+          membership: 'creator',
+        };
+        setUser(creatorProfile);
+        setIsAuthenticated(true);
+        localStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
+        localStorage.setItem(`${STORAGE_KEY}_user`, JSON.stringify(creatorProfile));
+
+        addNotification({
+          title: 'Creator & Commissioner OS',
+          message: 'Conectat cu succes ca Administrator Creator Global.',
+          type: 'reward',
+        });
+
+        return { success: true, hasLeague: true, isCreator: true };
+      }
+
+      const stored = await findFirestoreUser(cleanEmail);
       if (stored) {
+        const userMembership: UserMembership = stored.membership || (cleanEmail === 'creator@supermanager.ro' ? 'creator' : 'gratuit');
         setUser((prev) => ({
           ...prev,
           id: stored.id || prev.id,
@@ -835,6 +1093,8 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
           teamName: stored.teamName || prev.teamName,
           avatar: stored.avatar || prev.avatar,
           budget: stored.budget || prev.budget,
+          membership: userMembership,
+          starterPackClaimed: userMembership === 'creator' ? true : prev.starterPackClaimed,
         }));
         if (stored.leagueCode) {
           setLeagueSettings((prev) => ({
@@ -843,8 +1103,23 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
             leagueName: stored.leagueName || prev.leagueName,
           }));
         }
+
+        setIsAuthenticated(true);
+        localStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
+
+        addNotification({
+          title: 'Autentificare reușită',
+          message: `Bun venit înapoi, ${stored.name}!`,
+          type: 'reward',
+        });
+
+        return {
+          success: true,
+          hasLeague: !!stored?.leagueCode,
+          isCreator: userMembership === 'creator' || cleanEmail === 'creator@supermanager.ro',
+        };
       } else {
-        setUser((prev) => ({ ...prev, email }));
+        setUser((prev) => ({ ...prev, email: cleanEmail, membership: 'gratuit' }));
       }
 
       setIsAuthenticated(true);
@@ -856,7 +1131,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         type: 'reward',
       });
 
-      return { success: true, hasLeague: !!stored?.leagueCode };
+      return { success: true, hasLeague: false, isCreator: false };
     } catch (err) {
       setIsAuthenticated(true);
       localStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
@@ -994,17 +1269,19 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       lcm: startMids[1] ? startMids[1].id : null,
       rcm: startMids[2] ? startMids[2].id : null,
       rm: startMids[3] ? startMids[3].id : null,
-      lst: startFwds[0] ? startFwds[0].id : null,
-      rst: startFwds[1] ? startFwds[1].id : null,
+      ls: startFwds[0] ? startFwds[0].id : null,
+      rs: startFwds[1] ? startFwds[1].id : null,
     };
 
-    setSquad({
-      formation: '4-4-2',
-      startingSlots: newSlots,
-      benchPlayerIds: bench.map((p) => p.id),
-      captainPlayerId: starters[0]?.id || null,
-      boosterActive: false,
-    });
+    setSquad(
+      sanitizeSquad({
+        formation: '4-4-2',
+        startingSlots: newSlots,
+        benchPlayerIds: bench.map((p) => p.id),
+        captainPlayerId: starters[0]?.id || null,
+        boosterActive: false,
+      })
+    );
 
     // Set remaining transfer budget to €5.00M (€5,000,000)
     setUser((prev) => {
@@ -2325,6 +2602,57 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return true;
   };
 
+  // =========================================================================
+  // CLUBS MASTER DATABASE CONTROLS (Edit, Add, Toggle Active/Deactivated)
+  // =========================================================================
+  const updateClub = async (updatedClub: Club): Promise<boolean> => {
+    setClubs((prev) => prev.map((c) => (c.id === updatedClub.id ? updatedClub : c)));
+    await updateFirestoreClub(updatedClub);
+    addNotification({
+      title: '🛡️ Club Actualizat',
+      message: `Datele clubului ${updatedClub.name} au fost salvate în Master Database.`,
+      type: 'reward',
+    });
+    return true;
+  };
+
+  const addNewClub = async (clubData: Omit<Club, 'id'> & { id?: string }): Promise<boolean> => {
+    const newClubId = clubData.id || `club_${Date.now()}`;
+    const newClub: Club = {
+      ...clubData,
+      id: newClubId,
+      isActive: true,
+      logoColor: clubData.logoColor || '#10b981',
+      secondaryColor: clubData.secondaryColor || '#ffffff',
+      badgeText: clubData.badgeText || clubData.shortName || 'CLB',
+    };
+    setClubs((prev) => [...prev, newClub]);
+    await saveFirestoreClub(newClub);
+    addNotification({
+      title: '🌟 Club Nou Adăugat',
+      message: `Clubul ${newClub.name} a fost înregistrat cu succes în Superliga României!`,
+      type: 'reward',
+    });
+    return true;
+  };
+
+  const toggleClubStatus = async (clubId: string, isActive: boolean): Promise<boolean> => {
+    setClubs((prev) => prev.map((c) => (c.id === clubId ? { ...c, isActive } : c)));
+    await toggleFirestoreClubStatus(clubId, isActive);
+    addNotification({
+      title: isActive ? '🟢 Club Reactivat' : '🔴 Club Dezactivat',
+      message: isActive
+        ? 'Clubul și jucătorii săi au fost reactivați în joc.'
+        : 'Clubul a fost dezactivat. Fotbaliștii asociați sunt ascunși din tot jocul.',
+      type: 'transfer',
+    });
+    return true;
+  };
+
+  const updateUserMembership = (membership: UserMembership) => {
+    setUser((prev) => ({ ...prev, membership }));
+  };
+
   // 3-MINUTE DEMO MATCH ENGINE
   const startDemoMatch = useCallback(() => {
     setIsDemoMatchActive(true);
@@ -2564,6 +2892,13 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updatePlayerMarketValue,
         updateGlobalPlayerData,
         deletePlayerGlobal,
+        updateUserMembership,
+        clubs,
+        activeClubs,
+        allPlayers,
+        updateClub,
+        addNewClub,
+        toggleClubStatus,
         squadPointsMatchday,
         rawSquadPointsMatchday,
         squadTotalValue,

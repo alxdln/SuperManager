@@ -4,6 +4,7 @@ import { SUPERLIGA_CLUBS } from '../../data/superligaData';
 import { Player, PlayerPosition, UnifiedMarketItem } from '../../types/football';
 import { formatCurrency, formatFullCurrency, getPositionBadge } from '../../utils/scoringEngine';
 import { PlayerDetailModal } from '../player/PlayerDetailModal';
+import { getPlayerDisplayAvatar } from '../../utils/playerAvatar';
 import {
   Search,
   Store,
@@ -21,6 +22,7 @@ import {
   ShieldCheck,
   ChevronRight,
   Plus,
+  Users,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -77,9 +79,16 @@ export const TransferMarketView: React.FC = () => {
   // Overdraft Limit Block Modal State
   const [overdraftBlockMessage, setOverdraftBlockMessage] = useState<string | null>(null);
 
-  // User's players
-  const starters = Object.values(squad.startingSlots).filter(Boolean) as string[];
-  const myPlayerIds = Array.from(new Set([...starters, ...squad.benchPlayerIds]));
+  // Squad Full (16/16) Info Pop-up Modal State
+  const [showSquadFullModal, setShowSquadFullModal] = useState<boolean>(false);
+
+  // User's players (all starters + all bench players without omission)
+  const myPlayerIds = Array.from(
+    new Set([
+      ...(Object.values(squad.startingSlots).filter(Boolean) as string[]),
+      ...(Array.isArray(squad.benchPlayerIds) ? squad.benchPlayerIds : []),
+    ])
+  );
   const myPlayers = players.filter((p) => myPlayerIds.includes(p.id));
 
   // User's listings on the market
@@ -140,10 +149,7 @@ export const TransferMarketView: React.FC = () => {
     if (!item) return;
 
     if (squadCount >= 16) {
-      setActionMessage({
-        text: 'Lot plin (16/16 jucători)! Conform regulamentului, lotul nu poate depăși 16 jucători. Vinde un jucător mai întâi.',
-        type: 'error',
-      });
+      setShowSquadFullModal(true);
       return;
     }
 
@@ -182,7 +188,11 @@ export const TransferMarketView: React.FC = () => {
         origin: { y: 0.6 },
       });
     } else {
-      setActionMessage({ text: res.message, type: 'error' });
+      if (res.message && res.message.includes('16')) {
+        setShowSquadFullModal(true);
+      } else {
+        setActionMessage({ text: res.message, type: 'error' });
+      }
     }
   };
 
@@ -506,7 +516,7 @@ export const TransferMarketView: React.FC = () => {
                       {/* 50% Width Photo */}
                       <div className="w-1/2 max-w-[170px] aspect-square rounded-2xl overflow-hidden border-2 border-slate-700 shadow-md bg-slate-950 group-hover:scale-105 transition-transform shrink-0 relative">
                         <img
-                          src={player.avatar}
+                          src={getPlayerDisplayAvatar(player, user.membership)}
                           alt={player.name}
                           className="w-full h-full object-cover"
                           onError={(e) => {
@@ -776,7 +786,7 @@ export const TransferMarketView: React.FC = () => {
                       <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                         <div className="flex items-center gap-3 min-w-0">
                           <img
-                            src={player.avatar}
+                            src={getPlayerDisplayAvatar(player, user.membership)}
                             alt={player.name}
                             className="w-12 h-12 rounded-2xl object-cover border-2 border-indigo-500 bg-slate-950 shrink-0"
                           />
@@ -923,7 +933,7 @@ export const TransferMarketView: React.FC = () => {
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <img
-                        src={player.avatar}
+                        src={getPlayerDisplayAvatar(player, user.membership)}
                         alt={player.name}
                         className="w-10 h-10 rounded-xl object-cover border border-slate-700 bg-slate-950 shrink-0"
                       />
@@ -1228,6 +1238,81 @@ export const TransferMarketView: React.FC = () => {
             >
               Închide și Vinde Jucători
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Squad Full Info Pop-up Modal (16/16 Limit Reached) */}
+      {showSquadFullModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-slate-900 border-2 border-amber-500/60 rounded-3xl p-6 shadow-2xl space-y-4 text-center relative">
+            <button
+              onClick={() => setShowSquadFullModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+              aria-label="Închide"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 flex items-center justify-center mx-auto text-amber-400 shadow-inner">
+              <Users className="w-8 h-8" />
+            </div>
+
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-mono font-bold uppercase mb-2">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+                <span>Capacitate Maximă Atinsă</span>
+              </div>
+              <h3 className="text-base font-black uppercase tracking-tight text-white">
+                Lot Complet: 16/16 Jucători
+              </h3>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Nu poți face ofertă pentru acest fotbalist deoarece lotul clubului tău este deja la capacitate maximă (<b className="text-white">16/16 jucători</b>).
+            </p>
+
+            <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-left space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">Titulari pe teren (Primul 11):</span>
+                <span className="font-mono font-bold text-white">11 / 11</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">Jucători pe banca de rezerve:</span>
+                <span className="font-mono font-bold text-white">5 / 5</span>
+              </div>
+              <div className="border-t border-slate-800 pt-2 flex items-center justify-between text-xs font-bold">
+                <span className="text-amber-400">Total Lot SuperManager:</span>
+                <span className="font-mono text-amber-400">16 / 16 (100% Plin)</span>
+              </div>
+            </div>
+
+            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-200 text-left flex items-start gap-2">
+              <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <span>
+                Conform regulamentului oficial, numărul maxim admis este de 16 jucători. Pentru a putea cumpăra sau licita, trebuie mai întâi să vinzi un jucător din lot.
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+              <button
+                onClick={() => {
+                  setShowSquadFullModal(false);
+                  setActiveMainTab('sell');
+                }}
+                className="flex-1 py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black uppercase text-xs tracking-wider shadow-lg shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+              >
+                <Tag className="w-4 h-4" />
+                <span>Mergi la Vânzare Jucători</span>
+              </button>
+
+              <button
+                onClick={() => setShowSquadFullModal(false)}
+                className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs active:scale-95 transition-all"
+              >
+                Am înțeles
+              </button>
+            </div>
           </div>
         </div>
       )}

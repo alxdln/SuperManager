@@ -111,8 +111,25 @@
           "type": "string",
           "description": "Timestamp-ul ștergerii fotbalistului"
         }
+      }
+    },
+    "Club": {
+      "title": "Club",
+      "description": "Club oficial din Superliga României",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "shortName": { "type": "string" },
+        "city": { "type": "string" },
+        "stadium": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "logoColor": { "type": "string" },
+        "secondaryColor": { "type": "string" },
+        "badgeText": { "type": "string" }
       },
-      "required": ["id"]
+      "required": ["id", "name", "shortName", "city", "stadium"]
     }
   },
   "firestore": {
@@ -127,6 +144,10 @@
     "/deleted_players/{playerId}": {
       "schema": "DeletedPlayer",
       "description": "Colecția de jucători eliminați definitiv din joc pentru sincronizare globală"
+    },
+    "/clubs/{clubId}": {
+      "schema": "Club",
+      "description": "Colecția de cluburi din Superliga cu setări active/inactive și embleme oficiale"
     }
   }
 }

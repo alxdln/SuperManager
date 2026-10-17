@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useFantasy } from '../../context/FantasyContext';
 import { ALL_16_SUPERLIGA_CLUBS } from '../../data/superligaAll16ClubsPlayers';
-import { Player, PlayerPosition, Club } from '../../types/football';
+import { Player, PlayerPosition, Club, UserMembership } from '../../types/football';
 import { formatCurrency, formatFullCurrency } from '../../utils/scoringEngine';
 import {
   getAllFirestoreUsers,
@@ -39,6 +39,8 @@ import {
   Building2,
   Check,
   Globe2,
+  Power,
+  ImageIcon,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -47,7 +49,21 @@ interface DatabaseNavigatorViewProps {
 }
 
 export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () => {
-  const { players, updateGlobalPlayerData, deletePlayerGlobal, addNewPlayer, leagueSettings } = useFantasy();
+  const {
+    user,
+    updateUserMembership,
+    players,
+    allPlayers,
+    clubs,
+    activeClubs,
+    updateClub,
+    addNewClub,
+    toggleClubStatus,
+    updateGlobalPlayerData,
+    deletePlayerGlobal,
+    addNewPlayer,
+    leagueSettings,
+  } = useFantasy();
 
   // Active Sub-Tab
   const [activeSubTab, setActiveSubTab] = useState<'players' | 'managers' | 'leagues' | 'clubs'>('players');
@@ -86,6 +102,28 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
   const [editingManager, setEditingManager] = useState<StoredUserAccount | null>(null);
   const [passwordResetManager, setPasswordResetManager] = useState<StoredUserAccount | null>(null);
   const [deleteManagerConfirm, setDeleteManagerConfirm] = useState<StoredUserAccount | null>(null);
+
+  // --- CLUBS TAB STATE ---
+  const [clubSearch, setClubSearch] = useState('');
+  const [editingClub, setEditingClub] = useState<Club | null>(null);
+  const [isAddClubModalOpen, setIsAddClubModalOpen] = useState(false);
+  const [newClubForm, setNewClubForm] = useState<{
+    name: string;
+    shortName: string;
+    city: string;
+    stadium: string;
+    logoUrl: string;
+    logoColor: string;
+    secondaryColor: string;
+  }>({
+    name: '',
+    shortName: '',
+    city: '',
+    stadium: '',
+    logoUrl: '',
+    logoColor: '#DC2626',
+    secondaryColor: '#FFFFFF',
+  });
 
   // --- LEAGUES TAB STATE ---
   const [leagues, setLeagues] = useState<StoredLeagueData[]>([]);
@@ -280,7 +318,10 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
     e.preventDefault();
     if (!editingManager) return;
     await updateFirestoreUserAccount(editingManager);
-    showToast(`Datele managerului ${editingManager.name} au fost actualizate!`);
+    if (user.id === editingManager.id && editingManager.membership) {
+      updateUserMembership(editingManager.membership);
+    }
+    showToast(`Datele managerului ${editingManager.name} au fost actualizate! Nivel: ${(editingManager.membership || 'gratuit').toUpperCase()}`);
     setEditingManager(null);
     reloadManagers();
   };
@@ -298,6 +339,51 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
     const res = await sendPasswordResetLink(passwordResetManager.email);
     showToast(res.message, res.success ? 'success' : 'error');
     setPasswordResetManager(null);
+  };
+
+  // Handlers for Clubs
+  const handleSaveClub = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingClub) return;
+    await updateClub(editingClub);
+    showToast(`Datele clubului "${editingClub.name}" au fost salvate în Master Database!`, 'success');
+    setEditingClub(null);
+  };
+
+  const handleCreateClub = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newClubForm.name.trim() || !newClubForm.shortName.trim()) {
+      showToast('Te rugăm să introduci numele și prescurtarea clubului.', 'error');
+      return;
+    }
+    const defaultLogo = newClubForm.logoUrl.trim() || `https://ui-avatars.com/api/?name=${encodeURIComponent(newClubForm.shortName)}&background=0f172a&color=05df72&bold=true`;
+    await addNewClub({
+      ...newClubForm,
+      logoUrl: defaultLogo,
+    });
+    confetti({ particleCount: 50, spread: 70, origin: { y: 0.7 } });
+    showToast(`Clubul "${newClubForm.name}" a fost adăugat oficial în Superliga României!`, 'success');
+    setIsAddClubModalOpen(false);
+    setNewClubForm({
+      name: '',
+      shortName: '',
+      city: '',
+      stadium: '',
+      logoUrl: '',
+      logoColor: '#DC2626',
+      secondaryColor: '#FFFFFF',
+    });
+  };
+
+  const handleToggleClub = async (club: Club) => {
+    const nextStatus = club.isActive === false ? true : false;
+    await toggleClubStatus(club.id, nextStatus);
+    showToast(
+      nextStatus
+        ? `Clubul ${club.name} a fost reactivat! Jucătorii sunt acum disponibili.`
+        : `Clubul ${club.name} a fost dezactivat. Fotbaliștii asociați au fost ascunși din joc.`,
+      nextStatus ? 'success' : 'info'
+    );
   };
 
   // Handlers for League
@@ -319,7 +405,7 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
   };
 
   const getClubById = (id: string): Club | undefined => {
-    return ALL_16_SUPERLIGA_CLUBS.find((c) => c.id === id);
+    return clubs.find((c) => c.id === id) || ALL_16_SUPERLIGA_CLUBS.find((c) => c.id === id);
   };
 
   const getPositionBadge = (pos: PlayerPosition) => {
@@ -683,8 +769,21 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
                         className="w-11 h-11 rounded-2xl object-cover bg-slate-950 border border-slate-700 shadow shrink-0"
                       />
                       <div>
-                        <div className="font-bold text-white text-sm flex items-center gap-2">
+                        <div className="font-bold text-white text-sm flex items-center gap-2 flex-wrap">
                           <span>{m.name}</span>
+                          <span
+                            className={`px-1.5 py-0.2 rounded uppercase text-[9px] font-mono font-bold border ${
+                              m.membership === 'creator'
+                                ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
+                                : m.membership === 'admin'
+                                ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                                : m.membership === 'pro'
+                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                : 'bg-slate-800 text-slate-400 border-slate-700'
+                            }`}
+                          >
+                            {m.membership || 'gratuit'}
+                          </span>
                           {m.id === 'usr_me' && (
                             <span className="px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 text-[9px] font-mono">
                               Tu (Admin)
@@ -852,49 +951,101 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
       {/* ========================================================================= */}
       {/* 4. THE 16 OFFICIAL SUPERLIGA CLUBS 2026/2027 */}
       {/* ========================================================================= */}
+      {/* ========================================================================= */}
+      {/* 4. SUPERLIGA CLUBS MANAGEMENT (ADD, EDIT, DEACTIVATE, LOGOS) */}
+      {/* ========================================================================= */}
       {activeSubTab === 'clubs' && (
         <div className="space-y-4">
           <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <Building2 className="w-4 h-4 text-emerald-400" />
-                Toate Cele 16 Cluburi Oficiale Superliga României (2026/2027)
+                Gestiune Cluburi Superliga României
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Verificate conform Sofascore: Corvinul Hunedoara, FK Csíkszereda și FC Argeș fac parte din Superliga 26/27!
+                Editează denumirile, emblemele oficiale, dezactivează cluburile retrogradate sau adaugă cluburi noi promovate.
               </p>
             </div>
-            <span className="px-3 py-1 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-mono font-bold">
-              16 / 16 Echipe Aliniate
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-mono font-bold">
+                {activeClubs.length} Active / {clubs.length} Total Cluburi
+              </span>
+              <button
+                onClick={() => setIsAddClubModalOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-md shadow-emerald-500/20 active:scale-95 transition-all"
+              >
+                <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                <span>Adaugă Club Nou</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center gap-2.5 text-xs text-amber-200">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              <b>Regulă Master Database:</b> Când dezactivezi un club din lista de mai jos, toți fotbaliștii acelui club sunt ascunși automat din tot jocul (Piață de transferuri, Teren Tactic, Meci Live și Clasamente).
             </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {ALL_16_SUPERLIGA_CLUBS.map((club) => {
-              const clubPlayers = players.filter((p) => p.clubId === club.id);
+            {clubs.map((club) => {
+              const clubPlayers = (allPlayers || players).filter((p) => p.clubId === club.id);
               const totalValue = clubPlayers.reduce((acc, p) => acc + p.marketValue, 0);
+              const isDeactivated = club.isActive === false;
 
               return (
                 <div
                   key={club.id}
-                  className="p-4 bg-slate-900 border border-slate-800 hover:border-indigo-500/40 rounded-2xl transition-all shadow-sm flex flex-col justify-between gap-3 text-xs"
+                  className={`p-4 rounded-2xl transition-all shadow-sm flex flex-col justify-between gap-3 text-xs border ${
+                    isDeactivated
+                      ? 'bg-slate-950/80 border-rose-500/30 opacity-75'
+                      : 'bg-slate-900 border-slate-800 hover:border-indigo-500/40'
+                  }`}
                 >
-                  <div className="flex items-start gap-3">
-                    <img
-                      src={club.logoUrl || `https://api.sofascore.app/api/v1/team/1989/image`}
-                      alt={club.name}
-                      className="w-12 h-12 rounded-xl object-contain bg-slate-950 p-1.5 border border-slate-800 shrink-0"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                          club.shortName
-                        )}&background=0f172a&color=05df72&bold=true`;
-                      }}
-                    />
-                    <div>
-                      <h4 className="font-bold text-white text-sm">{club.name}</h4>
-                      <span className="text-[11px] text-slate-400 block mt-0.5">
-                        {club.city} · {club.stadium}
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <span
+                        className={`px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold uppercase border flex items-center gap-1 ${
+                          isDeactivated
+                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                            : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${isDeactivated ? 'bg-rose-400' : 'bg-emerald-400'}`} />
+                        {isDeactivated ? 'Dezactivat (Retrogradat)' : 'Activ în Superliga'}
                       </span>
+
+                      <button
+                        onClick={() => handleToggleClub(club)}
+                        className={`p-1.5 rounded-lg text-[10px] font-bold border transition-colors flex items-center gap-1 ${
+                          isDeactivated
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
+                            : 'bg-rose-500/20 text-rose-300 border-rose-500/40 hover:bg-rose-500/30'
+                        }`}
+                        title={isDeactivated ? 'Reactivează clubul' : 'Dezactivează clubul'}
+                      >
+                        <Power className="w-3.5 h-3.5" />
+                        <span className="text-[10px]">{isDeactivated ? 'Activează' : 'Dezactivează'}</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-start gap-3">
+                      <img
+                        src={club.logoUrl || `https://api.sofascore.app/api/v1/team/1989/image`}
+                        alt={club.name}
+                        className="w-12 h-12 rounded-xl object-contain bg-slate-950 p-1.5 border border-slate-800 shrink-0 shadow"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                            club.shortName
+                          )}&background=0f172a&color=05df72&bold=true`;
+                        }}
+                      />
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-white text-sm truncate">{club.name}</h4>
+                        <span className="text-[11px] text-slate-400 block mt-0.5 truncate">
+                          {club.city} · {club.stadium}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -911,16 +1062,26 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => {
-                      setPlayerClubFilter(club.id);
-                      setActiveSubTab('players');
-                    }}
-                    className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-indigo-600 hover:text-white text-slate-300 font-bold text-[11px] transition-all flex items-center justify-center gap-1.5"
-                  >
-                    <span>Vezi Lotul Jucătorilor</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </button>
+                  <div className="grid grid-cols-2 gap-1.5 pt-1">
+                    <button
+                      onClick={() => setEditingClub(club)}
+                      className="py-1.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] transition-all flex items-center justify-center gap-1 border border-slate-700"
+                    >
+                      <Edit3 className="w-3 h-3 text-indigo-400" />
+                      <span>Editează</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setPlayerClubFilter(club.id);
+                        setActiveSubTab('players');
+                      }}
+                      className="py-1.5 px-2 rounded-xl bg-slate-800 hover:bg-indigo-600 hover:text-white text-slate-300 font-bold text-[11px] transition-all flex items-center justify-center gap-1 border border-slate-700"
+                    >
+                      <span>Vezi Lotul</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -1403,6 +1564,48 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
                   className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-emerald-400 font-mono font-bold"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">
+                  Nivel de Membership (Privilegii Cont)
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['gratuit', 'pro', 'admin', 'creator'] as UserMembership[]).map((tier) => (
+                    <button
+                      key={tier}
+                      type="button"
+                      onClick={() => setEditingManager({ ...editingManager, membership: tier })}
+                      className={`p-2 rounded-xl border text-left font-bold capitalize flex items-center justify-between transition-all ${
+                        (editingManager.membership || 'gratuit') === tier
+                          ? tier === 'creator'
+                            ? 'bg-indigo-600/30 border-indigo-500 text-indigo-300 shadow'
+                            : tier === 'admin'
+                            ? 'bg-amber-600/30 border-amber-500 text-amber-300 shadow'
+                            : tier === 'pro'
+                            ? 'bg-emerald-600/30 border-emerald-500 text-emerald-300 shadow'
+                            : 'bg-slate-700/50 border-slate-500 text-slate-200 shadow'
+                          : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex flex-col">
+                        <span className="text-xs uppercase font-mono">{tier}</span>
+                        <span className="text-[10px] text-slate-400 font-normal">
+                          {tier === 'gratuit'
+                            ? 'Avatare gri • Puncte live echipă'
+                            : tier === 'pro'
+                            ? 'Poze reale • Live per fotbalist'
+                            : tier === 'admin'
+                            ? 'Admin setări ligă proprie'
+                            : 'Acces Creator & Commissioner'}
+                        </span>
+                      </div>
+                      {(editingManager.membership || 'gratuit') === tier && (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">

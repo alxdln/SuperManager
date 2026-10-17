@@ -2,7 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, getDoc, setDoc, doc, deleteDoc } from 'firebase/firestore';
 import { getAuth, sendPasswordResetEmail } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Player } from '../types/football';
+import { Player, Club, UserMembership } from '../types/football';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -149,6 +149,7 @@ export interface StoredUserAccount {
   leagueId?: string;
   leagueName?: string;
   leagueCode?: string;
+  membership?: UserMembership;
   createdAt: string;
 }
 
@@ -299,16 +300,32 @@ export async function getAllFirestoreUsers(): Promise<StoredUserAccount[]> {
   // Seed default base managers if storage is fresh
   const defaultManagers: StoredUserAccount[] = [
     {
+      id: 'usr_creator',
+      email: 'creator@supermanager.ro',
+      password: '1923',
+      name: 'SuperManager Creator',
+      teamName: 'Commissioner HQ',
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+      favoriteClubId: 'c_fcsb',
+      budget: 100000000,
+      leagueId: 'lg_superliga_official_2026',
+      leagueName: 'Superliga României 2026/2027',
+      leagueCode: 'SUPER2026',
+      membership: 'creator',
+      createdAt: '2026-07-01T10:00:00.000Z',
+    },
+    {
       id: 'usr_me',
       email: 'alex.manager@superliga.ro',
       name: 'Alex D.',
       teamName: 'Tricolorii Giulești FC',
       avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
-      favoriteClubId: 'fcsb',
+      favoriteClubId: 'c_fcsb',
       budget: 50000000,
       leagueId: 'lg_superliga_official_2026',
       leagueName: 'Superliga României 2026/2027',
       leagueCode: 'SUPER2026',
+      membership: 'pro',
       createdAt: '2026-07-15T10:00:00.000Z',
     },
     {
@@ -317,11 +334,12 @@ export async function getAllFirestoreUsers(): Promise<StoredUserAccount[]> {
       name: 'Andrei Popa',
       teamName: 'Dinamo Red Dogs FC',
       avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&h=200&q=80',
-      favoriteClubId: 'dinamo',
+      favoriteClubId: 'c_dinamo',
       budget: 5000000,
       leagueId: 'lg_superliga_official_2026',
       leagueName: 'Superliga României 2026/2027',
       leagueCode: 'SUPER2026',
+      membership: 'gratuit',
       createdAt: '2026-08-01T12:30:00.000Z',
     },
     {
@@ -330,11 +348,12 @@ export async function getAllFirestoreUsers(): Promise<StoredUserAccount[]> {
       name: 'Radu Dumitrescu',
       teamName: 'CFR White Wolves',
       avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&h=200&q=80',
-      favoriteClubId: 'cfr',
+      favoriteClubId: 'c_cfr',
       budget: 5000000,
       leagueId: 'lg_superliga_official_2026',
       leagueName: 'Superliga României 2026/2027',
       leagueCode: 'SUPER2026',
+      membership: 'gratuit',
       createdAt: '2026-08-10T14:15:00.000Z',
     },
     {
@@ -343,11 +362,12 @@ export async function getAllFirestoreUsers(): Promise<StoredUserAccount[]> {
       name: 'Mihai Stănescu',
       teamName: 'Oltenia Craiova Stars',
       avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=200&h=200&q=80',
-      favoriteClubId: 'craiova',
+      favoriteClubId: 'c_craiova',
       budget: 5000000,
       leagueId: 'lg_superliga_official_2026',
       leagueName: 'Superliga României 2026/2027',
       leagueCode: 'SUPER2026',
+      membership: 'admin',
       createdAt: '2026-09-01T09:45:00.000Z',
     },
   ];
@@ -705,6 +725,85 @@ export async function loadFirestoreDeletedPlayerIds(): Promise<string[]> {
   }
 
   return result;
+}
+
+// ==========================================
+// SUPERLIGA CLUBS MANAGEMENT (Firestore + Local Sync)
+// ==========================================
+
+export async function saveFirestoreClub(club: Club): Promise<boolean> {
+  try {
+    const docRef = doc(db, 'clubs', club.id);
+    await setDoc(docRef, { ...club, updatedAt: new Date().toISOString() }, { merge: true });
+
+    // Sync localStorage
+    const localClubs = JSON.parse(localStorage.getItem('supermanager_db_clubs') || '{}');
+    localClubs[club.id] = club;
+    localStorage.setItem('supermanager_db_clubs', JSON.stringify(localClubs));
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `clubs/${club.id}`);
+    const localClubs = JSON.parse(localStorage.getItem('supermanager_db_clubs') || '{}');
+    localClubs[club.id] = club;
+    localStorage.setItem('supermanager_db_clubs', JSON.stringify(localClubs));
+    return true;
+  }
+}
+
+export async function loadFirestoreClubs(): Promise<Club[]> {
+  const clubsMap: Record<string, Club> = {};
+
+  // 1. Read localStorage cache
+  try {
+    const local = JSON.parse(localStorage.getItem('supermanager_db_clubs') || '{}');
+    for (const key of Object.keys(local)) {
+      if (local[key]) clubsMap[key] = local[key];
+    }
+  } catch (e) {
+    /* ignore */
+  }
+
+  // 2. Fetch Firestore collection
+  try {
+    const colRef = collection(db, 'clubs');
+    const snapshot = await getDocs(colRef);
+    snapshot.forEach((d) => {
+      const data = d.data() as Club;
+      if (data && (data.id || d.id)) {
+        clubsMap[d.id] = {
+          ...data,
+          id: data.id || d.id,
+          isActive: data.isActive !== false, // default to active if not specified
+        };
+      }
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, 'clubs');
+  }
+
+  const result = Object.values(clubsMap);
+  return result;
+}
+
+export async function updateFirestoreClub(club: Club): Promise<boolean> {
+  return saveFirestoreClub(club);
+}
+
+export async function toggleFirestoreClubStatus(clubId: string, isActive: boolean): Promise<boolean> {
+  try {
+    const docRef = doc(db, 'clubs', clubId);
+    await setDoc(docRef, { isActive, updatedAt: new Date().toISOString() }, { merge: true });
+
+    const localClubs = JSON.parse(localStorage.getItem('supermanager_db_clubs') || '{}');
+    if (localClubs[clubId]) {
+      localClubs[clubId].isActive = isActive;
+      localStorage.setItem('supermanager_db_clubs', JSON.stringify(localClubs));
+    }
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `clubs/${clubId}`);
+    return false;
+  }
 }
 
 

@@ -20,8 +20,10 @@ import {
   Timer,
   Zap,
   AlertTriangle,
+  Lock,
 } from 'lucide-react';
 import { formatCurrency, formatFullCurrency } from '../../utils/scoringEngine';
+import { getPlayerDisplayAvatar } from '../../utils/playerAvatar';
 
 const fullPosMap: Record<PlayerPosition, string> = {
   GK: 'PORTAR',
@@ -40,6 +42,7 @@ const posColorMap: Record<PlayerPosition, { bg: string; text: string }> = {
 export const LiveMatchdayView: React.FC = () => {
   const {
     user,
+    updateUserMembership,
     fixtures,
     players,
     squad,
@@ -66,6 +69,7 @@ export const LiveMatchdayView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'myPlayers' | 'fixtures' | 'table' | 'topPerformers'>('myPlayers');
   const [selectedFixtureId, setSelectedFixtureId] = useState<string>(fixtures[0]?.id || 'fix_1');
   const [topPositionFilter, setTopPositionFilter] = useState<PlayerPosition | 'ALL'>('ALL');
+  const [showProUpgradeModal, setShowProUpgradeModal] = useState(false);
 
   // Selected player for "Flux Evenimente Live & Puncte" modal
   const [selectedPlayerForLive, setSelectedPlayerForLive] = useState<{
@@ -111,11 +115,18 @@ export const LiveMatchdayView: React.FC = () => {
     const oppClub = SUPERLIGA_CLUBS.find((c) => c.id === oppClubId);
 
     const ptsEarned = player.pointsMatchday * (isCaptain ? 2 : 1);
+    const isFreeTier = user.membership === 'gratuit';
+    const isFinished = fixture?.isFinished;
+    const hidePlayerLivePoints = isFreeTier && !isFinished;
 
     return (
       <div
         key={player.id}
         onClick={() => {
+          if (hidePlayerLivePoints) {
+            setShowProUpgradeModal(true);
+            return;
+          }
           setSelectedPlayerForLive({
             player,
             fixture,
@@ -134,7 +145,7 @@ export const LiveMatchdayView: React.FC = () => {
         <div className="flex items-center gap-3 min-w-0">
           <div className="relative shrink-0">
             <img
-              src={player.avatar}
+              src={getPlayerDisplayAvatar(player, user.membership)}
               alt={player.name}
               className="w-10 h-10 rounded-xl object-cover border border-slate-700 shadow-sm"
               onError={(e) => {
@@ -190,26 +201,38 @@ export const LiveMatchdayView: React.FC = () => {
 
         {/* Right side: Points badge and action prompt */}
         <div className="flex items-center gap-2.5 shrink-0">
-          <div className="text-right">
-            <div className="flex items-baseline justify-end gap-1">
-              <span
-                className={`font-mono text-sm font-black ${
-                  ptsEarned > 0
-                    ? 'text-emerald-400'
-                    : ptsEarned < 0
-                    ? 'text-rose-400'
-                    : 'text-amber-400'
-                }`}
-              >
-                {ptsEarned >= 0 ? `+${ptsEarned}` : ptsEarned}
+          {hidePlayerLivePoints ? (
+            <div className="text-right">
+              <span className="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-300 font-mono text-[10px] font-bold border border-slate-700/60 inline-flex items-center gap-1">
+                <Lock className="w-3 h-3 text-amber-400" />
+                <span>După final</span>
               </span>
-              <span className="text-[10px] text-slate-400 font-bold">pts</span>
+              <span className="text-[9px] text-amber-400 font-medium block flex items-center gap-0.5 justify-end mt-0.5">
+                <span>Deblocabil PRO</span>
+              </span>
             </div>
-            <span className="text-[9px] text-emerald-400/90 font-medium block flex items-center gap-0.5 justify-end mt-0.5">
-              <span>Flux Live</span>
-              <ChevronRight className="w-3 h-3 text-emerald-400" />
-            </span>
-          </div>
+          ) : (
+            <div className="text-right">
+              <div className="flex items-baseline justify-end gap-1">
+                <span
+                  className={`font-mono text-sm font-black ${
+                    ptsEarned > 0
+                      ? 'text-emerald-400'
+                      : ptsEarned < 0
+                      ? 'text-rose-400'
+                      : 'text-amber-400'
+                  }`}
+                >
+                  {ptsEarned >= 0 ? `+${ptsEarned}` : ptsEarned}
+                </span>
+                <span className="text-[10px] text-slate-400 font-bold">pts</span>
+              </div>
+              <span className="text-[9px] text-emerald-400/90 font-medium block flex items-center gap-0.5 justify-end mt-0.5">
+                <span>Flux Live</span>
+                <ChevronRight className="w-3 h-3 text-emerald-400" />
+              </span>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -985,6 +1008,61 @@ export const LiveMatchdayView: React.FC = () => {
           isStarter={selectedPlayerForLive.isStarter}
           onClose={() => setSelectedPlayerForLive(null)}
         />
+      )}
+
+      {/* PRO UPGRADE MODAL FOR FREE TIER */}
+      {showProUpgradeModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-center">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400">
+              <Sparkles className="w-7 h-7" />
+            </div>
+
+            <div>
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold uppercase">
+                Funcționalitate PRO
+              </span>
+              <h3 className="text-base font-bold text-white mt-2">
+                Puncte &amp; Acțiuni Live per Jucător
+              </h3>
+              <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+                În versiunea <b>Gratuit</b>, ai acces la scorul live total al echipei tale (<b>{rawSquadPointsMatchday} pts</b>), iar punctajele fiecărui fotbalist sunt afișate după terminarea meciurilor.
+              </p>
+              <div className="mt-3 p-3 bg-slate-950/80 rounded-2xl border border-slate-800 text-left text-[11px] space-y-1.5 text-slate-300">
+                <div className="flex items-center gap-2">
+                  <span className="text-amber-400 font-bold">★</span>
+                  <span>Scoruri și acțiuni live secundă cu secundă</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-amber-400 font-bold">★</span>
+                  <span>Poze reale oficiale pentru toți fotbaliștii</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-amber-400 font-bold">★</span>
+                  <span>Clasament al managerilor actualizat în timp real</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <button
+                onClick={() => setShowProUpgradeModal(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+              >
+                Am înțeles
+              </button>
+              <button
+                onClick={() => {
+                  updateUserMembership('pro');
+                  setShowProUpgradeModal(false);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-black shadow-lg shadow-amber-500/20"
+              >
+                Activează PRO Acum
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

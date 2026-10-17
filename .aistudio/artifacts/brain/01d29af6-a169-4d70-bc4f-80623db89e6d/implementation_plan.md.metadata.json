@@ -1,6 +1,6 @@
 {
-  "summary": "Plan de simplificare a structurii de date pentru jucători la cele 6 atribute esențiale (Nume Complet, Club, Poziție, Naționalitate, Avatar/Poză, Cotă Transfermarkt) cu păstrarea punctajului total calculat automat la etape, eliminarea câmpurilor secundare inutile din baza de date și asigurarea persistenței globale în timp real prin Firestore pentru toți managerii din joc.",
-  "updatedAt": "2026-10-15T13:05:25.631571743Z",
+  "summary": "Plan de arhitectură pentru ecranul de start Splash Screen, autentificare dedicată pentru Creator/Commissioner, reguli avansate de distribuire a lotului inițial (fără duplicate și cu respectarea limitei pe club), sistem ierarhic de membership (Gratuit, Pro, Admin, Creator) cu restricții specifice de imagini și date live, și gestiunea completă a cluburilor din Superliga (editare, adăugare club nou, embleme și dezactivare cu ascunderea jucătorilor).",
+  "updatedAt": "2026-10-17T12:55:47.593250629Z",
   "requestFeedback": true,
   "userFacing": true
 }

@@ -15,6 +15,9 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
+import { useFantasy } from '../../context/FantasyContext';
+import { getPlayerDisplayAvatar } from '../../utils/playerAvatar';
+
 interface StarterSquadRevealViewProps {
   allocatedSquad: Player[];
   onCompleteSquad: (squad: Player[]) => void;
@@ -24,6 +27,7 @@ export const StarterSquadRevealView: React.FC<StarterSquadRevealViewProps> = ({
   allocatedSquad,
   onCompleteSquad,
 }) => {
+  const { user } = useFantasy();
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const totalPlayers = allocatedSquad.length || 14;
@@ -156,11 +160,10 @@ export const StarterSquadRevealView: React.FC<StarterSquadRevealViewProps> = ({
           <div className="relative mb-3">
             <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-full overflow-hidden border-4 border-slate-800 bg-slate-900 shadow-xl ring-2 ring-emerald-500/30">
               <img
-                src={currentPlayer.avatar}
+                src={getPlayerDisplayAvatar(currentPlayer, user.membership)}
                 alt={currentPlayer.name}
                 className="w-full h-full object-cover"
                 onError={(e) => {
-                  // Fallback avatar if external image fails
                   (e.target as HTMLImageElement).src =
                     'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&h=250&q=80';
                 }}
