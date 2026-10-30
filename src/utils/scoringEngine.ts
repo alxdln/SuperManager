@@ -285,3 +285,155 @@ export function calculatePlayerRating(player: Player): number {
   if (pts < 45) return 9.1;
   return 9.8;
 }
+
+/**
+ * Maparea type_id Sportmonks -> Punctajele definite în sistemul Kickbase SuperManager
+ */
+export const SPORTMONKS_ACTION_POINTS: Record<number, number> = {
+  // Goluri & Atac
+  52: 50,    // Goal (+50p)
+  79: 30,    // Assist (+30p)
+  87: 10,    // Shot on target (+10p)
+  88: -3,    // Shot off target / missed (-3p)
+  94: 5,     // Key pass (+5p)
+  117: 5,    // Successful dribble (+5p)
+  99: 3,     // Accurate cross (+3p)
+  121: -3,   // Dispossessed / Turnover (-3p)
+  118: -15,  // Big chance missed (-15p)
+
+  // Pase
+  116: 1,    // Accurate pass (adaptat pt. pasă în teren advers) (+1p)
+  81: -1,    // Inaccurate pass (-1p)
+
+  // Dueluri & Apărare
+  100: 5,    // Tackle / Interception (+5p)
+  101: 5,    // Clearance (+5p)
+  102: 3,    // Shot blocked (+3p)
+  104: 25,   // Clearance off the line (+25p)
+  106: 3,    // Duel won (+3p)
+  107: 3,    // Aerial duel won (+3p)
+  108: -1,   // Duel lost (-1p)
+  109: -3,   // Dribbled past (-3p)
+  110: -1,   // Aerial lost (-1p)
+  120: -25,  // Error leading to goal (-25p)
+
+  // Disciplină & Penalty-uri
+  82: -25,   // Penalty conceded / committed (-25p)
+  83: -50,   // Red card (-50p)
+  84: -15,   // Yellow card (-15p)
+  85: 25,    // Penalty won / awarded (+25p)
+  89: -3,    // Foul committed (-3p)
+  90: 1,     // Foul drawn (+1p)
+  91: -30,   // Penalty missed (-30p)
+
+  // Portari
+  86: 5,     // Save (+5p)
+  125: 10,   // Save inside box (+10p)
+  126: 25,   // Penalty save (+25p)
+};
+
+export function calculateLivePointsFromSportmonks(
+  details: Array<{ type_id: number; value?: { total?: number } | number | any }>
+): number {
+  if (!Array.isArray(details)) return 0;
+  let points = 0;
+  for (const item of details) {
+    // Evităm type_id 119 (minute jucate) în bucla de acțiuni pure dacă este calculat contextual
+    if (item.type_id === 119) continue;
+    const pts = SPORTMONKS_ACTION_POINTS[item.type_id] || 0;
+    const count = typeof item.value === 'object' && item.value !== null 
+      ? (item.value.total ?? 0) 
+      : (typeof item.value === 'number' ? item.value : 0);
+    points += pts * count;
+  }
+  return points;
+}
+
+export interface ContextualMatchParams {
+  position?: PlayerPosition;
+  minutesPlayed: number;
+  isStarter: boolean;
+  teamGoalsFor: number;
+  teamGoalsAgainst: number;
+  isFinished?: boolean;
+}
+
+/**
+ * Calculează punctele contextuale de meci (Clean Sheet, Titular/Rezervă, Rezultat Echipă)
+ * care nu vin ca type_id direct în lineups.details:
+ * - Titular (+5p) vs Intrat de pe bancă (+3p)
+ * - Minute jucate (+1p la fiecare 10 min)
+ * - Clean Sheet (+30p GK, +15p DEF dacă goluri primite = 0 și minute jucate >= 60)
+ * - Rezultat meci (Victorie: +15p | Egal: +5p | Înfrângere: -15p)
+ */
+export function calculateContextualPoints(params: ContextualMatchParams): {
+  totalContextualPoints: number;
+  cleanSheetPoints: number;
+  starterBonus: number;
+  minutesBonus: number;
+  matchResultBonus: number;
+  breakdown: string[];
+} {
+  const { position, minutesPlayed, isStarter, teamGoalsFor, teamGoalsAgainst } = params;
+  let totalContextualPoints = 0;
+  const breakdown: string[] = [];
+
+  // 1. Prezență: Titular vs Rezervă (dacă a bifat minute în meci)
+  let starterBonus = 0;
+  if (minutesPlayed > 0) {
+    if (isStarter) {
+      starterBonus = SCORING_RULES.STARTER; // +5p
+      breakdown.push(`Titular (+${starterBonus}p)`);
+    } else {
+      starterBonus = SCORING_RULES.SUBSTITUTE_IN; // +3p
+      breakdown.push(`Intrat de pe bancă (+${starterBonus}p)`);
+    }
+    totalContextualPoints += starterBonus;
+  }
+
+  // 2. Minute jucate (+1p la fiecare 10 min)
+  const minutesBonus = Math.floor(minutesPlayed / 10);
+  if (minutesBonus > 0) {
+    totalContextualPoints += minutesBonus;
+    breakdown.push(`Timp pe teren: ${minutesPlayed}' (+${minutesBonus}p)`);
+  }
+
+  // 3. Clean Sheet (Poartă Intactă: +30p GK, +15p DEF dacă goluri primite = 0 și minute >= 60)
+  let cleanSheetPoints = 0;
+  if (teamGoalsAgainst === 0 && minutesPlayed >= 60) {
+    if (position === 'GK') {
+      cleanSheetPoints = SCORING_RULES.CLEAN_SHEET_GK; // +30p
+      breakdown.push(`Clean Sheet Portar (+${cleanSheetPoints}p)`);
+    } else if (position === 'DEF') {
+      cleanSheetPoints = SCORING_RULES.CLEAN_SHEET_DEF; // +15p
+      breakdown.push(`Clean Sheet Fundaș (+${cleanSheetPoints}p)`);
+    }
+    totalContextualPoints += cleanSheetPoints;
+  }
+
+  // 4. Rezultat meci (Victorie: +15p | Egal: +5p | Înfrângere: -15p) dacă a jucat
+  let matchResultBonus = 0;
+  if (minutesPlayed > 0) {
+    if (teamGoalsFor > teamGoalsAgainst) {
+      matchResultBonus = SCORING_RULES.MATCH_WON; // +15p
+      breakdown.push(`Victorie Echipă (+${matchResultBonus}p)`);
+    } else if (teamGoalsFor === teamGoalsAgainst) {
+      matchResultBonus = SCORING_RULES.MATCH_DRAW; // +5p
+      breakdown.push(`Egal Echipă (+${matchResultBonus}p)`);
+    } else {
+      matchResultBonus = SCORING_RULES.MATCH_LOST; // -15p
+      breakdown.push(`Înfrângere Echipă (${matchResultBonus}p)`);
+    }
+    totalContextualPoints += matchResultBonus;
+  }
+
+  return {
+    totalContextualPoints,
+    cleanSheetPoints,
+    starterBonus,
+    minutesBonus,
+    matchResultBonus,
+    breakdown,
+  };
+}
+

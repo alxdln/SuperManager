@@ -322,12 +322,25 @@ export const TacticalPitchView: React.FC = () => {
 
                   {/* Player Name Pill (exact sub poză, fără distanță) */}
                   <div className="-mt-1 px-[5px] pb-[2px] pt-0.5 bg-slate-950/95 backdrop-blur-md rounded-lg border border-slate-700/90 shadow-md text-center max-w-[92px] sm:max-w-[110px] truncate relative z-0">
-                    <span className="text-[15px] font-bold italic uppercase tracking-tight text-white block truncate leading-tight px-[3px]">
+                    <span className="text-[13px] sm:text-[14px] font-bold italic uppercase tracking-tight text-white block truncate leading-tight px-[3px]">
                       {player.lastName || player.name}
                     </span>
                   </div>
 
-                  {/* Schimbă Titular (sub nume) */}
+                  {/* Puncte Live Fotbalist (actualizate automat prin starea reactivă din Sportmonks la 30s) */}
+                  <div className="mt-0.5 px-2 py-0.5 rounded-md bg-slate-950/90 border border-slate-700/80 shadow flex items-center gap-1">
+                    <span
+                      className={`font-mono text-[11px] font-black tracking-tight ${
+                        player.pointsMatchday * (isCaptain ? 2 : 1) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                      }`}
+                    >
+                      {player.pointsMatchday * (isCaptain ? 2 : 1) > 0 ? '+' : ''}
+                      {player.pointsMatchday * (isCaptain ? 2 : 1)}p
+                    </span>
+                    {isCaptain && <span className="text-[8px] font-bold text-amber-300 font-mono">2x</span>}
+                  </div>
+
+                  {/* Schimbă Titular (sub puncte) */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -338,10 +351,10 @@ export const TacticalPitchView: React.FC = () => {
                         playerId,
                       });
                     }}
-                    className="mt-0 px-2 py-[3px] rounded-full bg-slate-900/95 hover:bg-emerald-500 border border-slate-600/90 hover:border-emerald-400 text-slate-200 hover:text-slate-950 flex items-center justify-center shadow-md transition-all active:scale-95 cursor-pointer group/swap"
+                    className="mt-0.5 px-2 py-[2px] rounded-full bg-slate-900/95 hover:bg-emerald-500 border border-slate-600/90 hover:border-emerald-400 text-slate-200 hover:text-slate-950 flex items-center justify-center shadow-md transition-all active:scale-95 cursor-pointer group/swap"
                     title="Schimbă titular"
                   >
-                    <span className="text-sm font-black leading-none select-none">⇄</span>
+                    <span className="text-xs font-black leading-none select-none">⇄</span>
                   </button>
                 </div>
               ) : (

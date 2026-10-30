@@ -59,6 +59,73 @@ const getPerformanceColorTier = (points: number) => {
   };
 };
 
+interface FormMatchBar {
+  label: string;
+  points: number;
+  opponent: string;
+  minutes: number;
+}
+
+const RecentFormBarChart: React.FC<{ matches: FormMatchBar[] }> = ({ matches }) => {
+  if (!matches || matches.length === 0) return null;
+
+  const maxPoints = Math.max(35, ...matches.map((m) => Math.abs(m.points)));
+
+  return (
+    <div className="p-3.5 bg-slate-900/90 rounded-2xl border border-slate-800 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+          <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+          Forma Recentă (Ultimele Etape)
+        </span>
+        <span className="text-[10px] text-slate-400 font-mono">
+          Evoluție Puncte
+        </span>
+      </div>
+
+      <div className="h-28 flex items-end justify-between gap-2 pt-5 pb-1 px-1 border-b border-slate-800">
+        {matches.map((m, idx) => {
+          const heightPct = Math.max(12, Math.min(100, Math.round((Math.abs(m.points) / maxPoints) * 100)));
+          const isNegative = m.points < 0;
+          const isZero = m.points === 0;
+
+          const barColor = isNegative
+            ? 'bg-rose-500 shadow-rose-500/20'
+            : isZero
+            ? 'bg-slate-700'
+            : m.points >= 30
+            ? 'bg-emerald-400 shadow-emerald-400/20'
+            : m.points >= 15
+            ? 'bg-teal-400 shadow-teal-400/20'
+            : 'bg-blue-400 shadow-blue-400/20';
+
+          return (
+            <div key={idx} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end group relative">
+              <span
+                className={`text-[10px] font-mono font-black tabular-nums ${
+                  isNegative ? 'text-rose-400' : isZero ? 'text-slate-500' : 'text-emerald-400'
+                }`}
+              >
+                {m.points > 0 ? `+${m.points}` : m.points}
+              </span>
+
+              <div
+                style={{ height: `${heightPct}%` }}
+                className={`w-full max-w-[28px] rounded-t-lg transition-all duration-300 shadow-sm ${barColor}`}
+                title={`vs ${m.opponent} (${m.minutes}')`}
+              />
+
+              <span className="text-[10px] font-mono font-medium text-slate-400 tracking-tight">
+                {m.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 export const PlayerDetailModal: React.FC<PlayerDetailModalProps> = ({ player, onClose, onOpenAuction }) => {
   const { user, squad, setCaptain, squadCount, gkCount } = useFantasy();
 
@@ -113,6 +180,30 @@ export const PlayerDetailModal: React.FC<PlayerDetailModalProps> = ({ player, on
   const averageMatchdayPoints = allPastMatches.length > 0
     ? Math.round(totalHistoryPoints / allPastMatches.length)
     : Math.round(Number(player.pointsMatchday));
+
+  // Forma recentă pentru graficul cu bare (ultimele 5 etape în ordine cronologică)
+  const formMatches: FormMatchBar[] = [];
+  if (player.lastMatchDetails) {
+    const opp = SUPERLIGA_CLUBS.find((c) => c.id === player.lastMatchDetails?.opponentClubId);
+    formMatches.push({
+      label: `E${player.lastMatchDetails.gameweek}`,
+      points: player.lastMatchDetails.points,
+      opponent: opp?.name || String(player.lastMatchDetails.opponentClubId),
+      minutes: player.lastMatchDetails.minutesPlayed,
+    });
+  }
+
+  allPastMatches.slice(0, 5 - formMatches.length).forEach((m) => {
+    const opp = SUPERLIGA_CLUBS.find((c) => c.id === m.opponentClubId);
+    formMatches.push({
+      label: `E${m.matchday}`,
+      points: m.points,
+      opponent: opp?.name || m.opponentClubId,
+      minutes: m.minutesPlayed,
+    });
+  });
+
+  formMatches.reverse();
 
   // Native Mobile Swipe-to-Back Handlers
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -325,18 +416,98 @@ export const PlayerDetailModal: React.FC<PlayerDetailModalProps> = ({ player, on
             </div>
           </div>
 
-          {/* Past Matches History with Pure Chromatic Scale (No text labels, no explicit legend) */}
+          {/* 1. Bar Chart: Forma Recentă (Ultimele Etape) */}
+          <RecentFormBarChart matches={formMatches} />
+
+          {/* 2. Ultimul Meci: Detaliat Granular Kickbase (Doar ultimul meci are detalii complete) */}
+          <div className="space-y-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+              ⚡ Ultimul Meci (Analiză Granulară Kickbase)
+            </span>
+
+            {player.lastMatchDetails ? (
+              <div className="p-3.5 rounded-2xl bg-slate-900 border border-emerald-500/40 space-y-2.5 shadow-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-bold text-amber-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                      Etapa {player.lastMatchDetails.gameweek}
+                    </span>
+                    <span className="font-bold text-white text-xs">
+                      vs {SUPERLIGA_CLUBS.find((c) => c.id === player.lastMatchDetails?.opponentClubId)?.name || player.lastMatchDetails.opponentClubId}
+                    </span>
+                  </div>
+                  <span className="font-mono font-black text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/30">
+                    +{player.lastMatchDetails.points} puncte
+                  </span>
+                </div>
+
+                {/* Sub-breakdown: Contextual + Acțiuni */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[10px]">
+                  <div className="p-1.5 bg-slate-950 rounded-lg border border-slate-800">
+                    <span className="text-slate-400 block">Timp Jucat</span>
+                    <span className="font-mono font-bold text-white">
+                      {player.lastMatchDetails.minutesPlayed}&apos; (+{player.lastMatchDetails.contextualPoints?.minutes || 0}p)
+                    </span>
+                  </div>
+                  <div className="p-1.5 bg-slate-950 rounded-lg border border-slate-800">
+                    <span className="text-slate-400 block">Clean Sheet</span>
+                    <span className={`font-mono font-bold ${player.lastMatchDetails.contextualPoints?.cleanSheet ? 'text-emerald-400' : 'text-slate-500'}`}>
+                      {player.lastMatchDetails.contextualPoints?.cleanSheet ? `+${player.lastMatchDetails.contextualPoints.cleanSheet}p` : '0p'}
+                    </span>
+                  </div>
+                  <div className="p-1.5 bg-slate-950 rounded-lg border border-slate-800">
+                    <span className="text-slate-400 block">Rezultat Echipă</span>
+                    <span
+                      className={`font-mono font-bold ${
+                        (player.lastMatchDetails.contextualPoints?.result || 0) > 0
+                          ? 'text-emerald-400'
+                          : (player.lastMatchDetails.contextualPoints?.result || 0) === 0
+                          ? 'text-amber-400'
+                          : 'text-rose-400'
+                      }`}
+                    >
+                      {(player.lastMatchDetails.contextualPoints?.result || 0) > 0
+                        ? `+${player.lastMatchDetails.contextualPoints.result}p (Victorie)`
+                        : (player.lastMatchDetails.contextualPoints?.result || 0) === 0
+                        ? '+5p (Egal)'
+                        : `${player.lastMatchDetails.contextualPoints?.result || -15}p (Înfrângere)`}
+                    </span>
+                  </div>
+                  <div className="p-1.5 bg-slate-950 rounded-lg border border-slate-800">
+                    <span className="text-slate-400 block">Puncte Acțiuni</span>
+                    <span className="font-mono font-bold text-teal-400">
+                      +{player.lastMatchDetails.breakdownPoints?.actions ?? player.lastMatchDetails.points}p
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-xs flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono font-bold text-amber-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                    Etapa Curentă
+                  </span>
+                  <span className="text-white font-medium">Prestație Live Kickbase</span>
+                </div>
+                <span className="font-mono font-bold text-emerald-400">
+                  +{player.pointsMatchday} pts
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* 3. Meciuri Anterioare (Arhivă Compactă: doar rezumatul numeric) */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                <Calendar className="w-4 h-4 text-emerald-400" /> Istoric Meciuri &amp; Punctaje
+                <Calendar className="w-4 h-4 text-emerald-400" /> Etape Anterioare (Rezumat)
               </h3>
               <span className="text-[11px] text-slate-400 font-mono">
-                Ultimele {allPastMatches.length} etape
+                {allPastMatches.length} meciuri arhivate
               </span>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {allPastMatches.map((item, idx) => {
                 const oppClub = SUPERLIGA_CLUBS.find((c) => c.id === item.opponentClubId);
                 const perf = getPerformanceColorTier(item.points);
@@ -344,37 +515,23 @@ export const PlayerDetailModal: React.FC<PlayerDetailModalProps> = ({ player, on
                 return (
                   <div
                     key={idx}
-                    className="p-3 rounded-2xl bg-slate-800/50 border border-slate-700/60 flex flex-col gap-1.5"
+                    className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800/80 flex items-center justify-between text-xs"
                   >
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-bold text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
-                          Etapa {item.matchday}
-                        </span>
-                        <span className="font-bold text-white">vs {oppClub?.name || item.opponentClubId}</span>
-                        <span className="text-slate-400 font-mono text-[11px]">({item.result})</span>
-                      </div>
-
-                      {/* Scara cromatică pură pentru puncte */}
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className={`font-mono font-bold text-xs px-2.5 py-0.5 rounded-lg border ${perf.badgeBg}`}>
-                          +{item.points} pts
-                        </span>
-                        {item.minutesPlayed > 0 && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/80 text-slate-200 font-mono font-bold">
-                            ★ {item.rating}
-                          </span>
-                        )}
-                      </div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-mono text-[10px] font-bold text-slate-400 bg-slate-950 px-1.5 py-0.2 rounded border border-slate-800 shrink-0">
+                        E{item.matchday}
+                      </span>
+                      <span className="font-medium text-white truncate">
+                        vs {oppClub?.name || item.opponentClubId}
+                      </span>
+                      <span className="text-slate-400 text-[11px] shrink-0">
+                        · {item.minutesPlayed}&apos;
+                      </span>
                     </div>
 
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3 text-slate-500" />
-                        {item.minutesPlayed > 0 ? `${item.minutesPlayed}' jucate` : '0 min (Pe bancă)'}
-                      </span>
-                      <span className="text-slate-300 font-medium">
-                        {item.eventsSummary || (item.minutesPlayed === 0 ? 'Rezervă neutilizată' : item.goals > 0 ? `${item.goals} gol` : 'Titular integralist')}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`font-mono font-bold text-xs px-2 py-0.5 rounded border ${perf.badgeBg}`}>
+                        {item.points >= 0 ? `+${item.points}` : item.points}p
                       </span>
                     </div>
                   </div>

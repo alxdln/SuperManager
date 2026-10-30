@@ -47,8 +47,37 @@ export interface MatchHistoryItem {
   eventsSummary?: string;
 }
 
+export interface PlayerMatchSummary {
+  fixtureId: number | string;
+  gameweek: number;
+  opponentClubId: string;
+  points: number;
+  minutesPlayed: number;
+  date: string;
+  result?: string; // 'W' | 'D' | 'L'
+}
+
+export interface PlayerLastMatchDetails {
+  fixtureId: number | string;
+  gameweek: number;
+  opponentClubId: string;
+  points: number;
+  minutesPlayed: number;
+  contextualPoints: {
+    cleanSheet: number;
+    starter: number;
+    minutes: number;
+    result: number;
+  };
+  detailedStats: Record<string, number>;
+  breakdownPoints: Record<string, number>;
+  finalizedAt: string;
+  events?: Array<{ minute: number; description: string; points: number }>;
+}
+
 export interface Player {
-  id: string;
+  id: string; // ID intern (ex: "fcsb_d_olaru")
+  sportmonksId?: number; // ID oficial Sportmonks
   name: string; // 1. Nume Complet
   clubId: string; // 2. Club
   position: PlayerPosition; // 3. Poziție
@@ -63,6 +92,12 @@ export interface Player {
   valueTrend: number[];
   stats: PlayerStats;
   matchHistory: MatchHistoryItem[];
+
+  // Arhivă compactă & detalii granulare ultimul meci
+  lastMatchDetails?: PlayerLastMatchDetails | null;
+  totalSeasonPoints?: number;
+  matchesPlayed?: number;
+  lastMatchPoints?: number;
 
   // Câmpuri secundare opționale (eliminate din formular și baza de date)
   firstName?: string;

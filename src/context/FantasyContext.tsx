@@ -19,11 +19,14 @@ import {
   PlayerStats,
   Club,
   UserMembership,
+  PlayerLastMatchDetails,
+  MatchHistoryItem,
 } from '../types/football';
 import { INITIAL_PLAYERS, INITIAL_FIXTURES, INITIAL_LEAGUE_NEWS } from '../data/superligaData';
 import { ALL_16_SUPERLIGA_PLAYERS, ALL_16_SUPERLIGA_CLUBS } from '../data/superligaAll16ClubsPlayers';
 import { FORMATIONS } from '../data/formations';
 import { calculateEventPoints, formatCurrency, formatFullCurrency } from '../utils/scoringEngine';
+import { DemoCompletedMatchData } from '../components/live/DemoMatchSaveModal';
 import {
   loadFirestoreCustomPlayers,
   saveFirestoreCustomPlayer,
@@ -39,7 +42,11 @@ import {
   saveFirestoreClub,
   updateFirestoreClub,
   toggleFirestoreClubStatus,
+  subscribeToLiveMatches,
+  loadGameweekFinalScores,
 } from '../lib/firebase';
+import { SportmonksLiveService } from '../services/liveFootballApis';
+import { MatchFinalizerService, FinalizeFixtureParams } from '../services/matchFinalizer';
 
 interface FantasyContextType {
   // User & Auth
@@ -149,15 +156,44 @@ interface FantasyContextType {
   isSquadValid: boolean;
   squadValidationErrors: string[];
 
-  // Demo Match (3-Minute Live Simulation)
+  // Demo Match (1-Minute Live Simulation)
   isDemoMatchActive: boolean;
   demoTimeRemaining: number;
   demoMinute: number;
   demoHomeScore: number;
   demoAwayScore: number;
   demoEvents: MatchLiveEvent[];
+  demoEventsByPlayer: Record<string, MatchLiveEvent[]>;
+  pendingDemoMatchSave: DemoCompletedMatchData | null;
+  showDemoSaveModal: boolean;
+  setShowDemoSaveModal: (val: boolean) => void;
   startDemoMatch: () => void;
   resetDemoMatch: () => void;
+  confirmSaveDemoMatch: () => Promise<void>;
+  cancelDemoMatch: () => void;
+  resetMatchdayDataToZero: () => void;
+
+  // Sportmonks v3 Live Stats & Mappings
+  sportmonksScores: Map<number, number>;
+  sportmonksPlayerDetails: Map<number, { minutes: number; details: any[]; playerInfo?: any }>;
+  sportmonksActiveMatches: any[];
+  isSportmonksPolling: boolean;
+  syncSportmonksPlayerIds: () => Promise<{ matchedCount: number; message: string }>;
+  refreshSportmonksLiveScores: () => Promise<void>;
+
+  // Finalizare Meciuri FT & Arhivare Compactă (5 min delay)
+  finalizedMatchIds: string[];
+  pendingFinalizations: Array<{
+    fixtureId: string;
+    homeClubId: string;
+    awayClubId: string;
+    homeScore: number;
+    awayScore: number;
+    scheduledTime: number;
+    secondsRemaining: number;
+  }>;
+  finalizeMatchNow: (fixtureId: string | number) => Promise<{ success: boolean; message: string }>;
+  simulateFinishedMatchFT: (fixtureId?: string, homeScore?: number, awayScore?: number) => void;
 }
 
 const STORAGE_KEY = 'supermanager_fantasy_state_v2';
@@ -288,7 +324,12 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     map.forEach((p) => {
       if (localDeleted.has(p.id)) return;
       if (p.clubId === 'iasi' || p.clubId === 'buzau' || p.clubId === 'slobozia') return;
-      result.push(overrides[p.id] ? { ...p, ...overrides[p.id] } : p);
+      const merged = overrides[p.id] ? { ...p, ...overrides[p.id] } : p;
+      result.push({
+        ...merged,
+        // Punctele de etapă pornesc de la 0 pentru a rula exclusiv date reale sau teste demo
+        pointsMatchday: overrides[p.id]?.pointsMatchday ?? 0,
+      });
     });
 
     return result;
@@ -553,11 +594,20 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     ];
   });
 
-  // Fixtures
+  // Fixtures (curățate de orice date mock reziduale din cache)
   const [fixtures, setFixtures] = useState<Fixture[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_fixtures`);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { /* ignore */ }
+      try {
+        const parsed: Fixture[] = JSON.parse(saved);
+        const hasLegacyMock = parsed.some(
+          (f) =>
+            f.events?.some((ev) => ev.id?.startsWith('ev_') || ev.id?.startsWith('ev_c')) ||
+            f.minute === 74 ||
+            f.minute === 88
+        );
+        if (!hasLegacyMock && parsed.length > 0) return parsed;
+      } catch (e) { /* ignore */ }
     }
     return INITIAL_FIXTURES;
   });
@@ -623,13 +673,177 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     },
   ]);
 
-  // 3-Minute Demo Match State (Realistic match simulation with user's squad players)
+  // 1-Minute Demo Match State (Accelerated match simulation with user's squad players)
   const [isDemoMatchActive, setIsDemoMatchActive] = useState<boolean>(false);
-  const [demoTimeRemaining, setDemoTimeRemaining] = useState<number>(180); // 180 seconds = 3 minutes real time
+  const [demoTimeRemaining, setDemoTimeRemaining] = useState<number>(60); // 60 seconds = 1 minute real time
   const [demoMinute, setDemoMinute] = useState<number>(0); // 0 to 90 match minutes
   const [demoHomeScore, setDemoHomeScore] = useState<number>(0);
   const [demoAwayScore, setDemoAwayScore] = useState<number>(0);
   const [demoEvents, setDemoEvents] = useState<MatchLiveEvent[]>([]);
+  const [demoEventsByPlayer, setDemoEventsByPlayer] = useState<Record<string, MatchLiveEvent[]>>({});
+  const [pendingDemoMatchSave, setPendingDemoMatchSave] = useState<DemoCompletedMatchData | null>(null);
+  const [showDemoSaveModal, setShowDemoSaveModal] = useState<boolean>(false);
+
+  // =========================================================================
+  // SPORTMONKS V3 LIVE STATS & POLLING INTEGRATION
+  // =========================================================================
+  const [sportmonksScores, setSportmonksScores] = useState<Map<number, number>>(new Map());
+  const [sportmonksPlayerDetails, setSportmonksPlayerDetails] = useState<
+    Map<number, { minutes: number; details: any[]; playerInfo?: any }>
+  >(new Map());
+  const [sportmonksActiveMatches, setSportmonksActiveMatches] = useState<any[]>([]);
+  const [isSportmonksPolling, setIsSportmonksPolling] = useState<boolean>(false);
+
+  // =========================================================================
+  // MATCH FINALIZER & 5-MINUTE FT DELAYED QUEUE
+  // =========================================================================
+  const [finalizedMatchIds, setFinalizedMatchIds] = useState<string[]>([]);
+  const [pendingFinalizations, setPendingFinalizations] = useState<
+    Array<{
+      fixtureId: string;
+      homeClubId: string;
+      awayClubId: string;
+      homeScore: number;
+      awayScore: number;
+      scheduledTime: number;
+      secondsRemaining: number;
+    }>
+  >([]);
+
+  useEffect(() => {
+    MatchFinalizerService.loadFinalizedMatchIds().then((ids) => {
+      setFinalizedMatchIds(ids);
+    });
+  }, []);
+
+  // Sync Sportmonks IDs function
+  const syncSportmonksPlayerIds = useCallback(async () => {
+    const res = await SportmonksLiveService.syncPlayerSportmonksIds(masterPlayers);
+    if (res.updatedPlayers && res.updatedPlayers.length > 0) {
+      setMasterPlayers(res.updatedPlayers);
+    }
+    return { matchedCount: res.matchedCount, message: res.message };
+  }, [masterPlayers]);
+
+  // Trigger manual refresh of live scores
+  const refreshSportmonksLiveScores = useCallback(async () => {
+    try {
+      const scores = await SportmonksLiveService.getLiveCalculatedScores();
+      setSportmonksScores(new Map(scores));
+      setSportmonksPlayerDetails(new Map(SportmonksLiveService.lastPlayerDetailsMap));
+      setSportmonksActiveMatches([...SportmonksLiveService.lastActiveMatches]);
+
+      if (scores.size > 0) {
+        setMasterPlayers((prev) =>
+          prev.map((player) => {
+            if (player.sportmonksId && scores.has(player.sportmonksId)) {
+              const livePts = scores.get(player.sportmonksId)!;
+              return { ...player, pointsMatchday: livePts };
+            }
+            return player;
+          })
+        );
+      }
+    } catch (err) {
+      console.error('[Sportmonks] Manual refresh error:', err);
+    }
+  }, []);
+
+  // 1. Universal Real-Time Listener via Firestore onSnapshot (/live_matches/current)
+  // Toți utilizatorii (Gratuit, Pro, etc.) primesc actualizările live în timp real fără a apela Sportmonks direct.
+  useEffect(() => {
+    // Încarcă scorurile persistate (ex: meciuri FT deja finalizate) la pornire
+    loadGameweekFinalScores('gw_current').then((persisted) => {
+      if (persisted && persisted.scores) {
+        const scoresMap = new Map<number, number>();
+        Object.entries(persisted.scores).forEach(([idStr, pts]) => {
+          scoresMap.set(Number(idStr), Number(pts));
+        });
+        setSportmonksScores(scoresMap);
+        if (persisted.matches && persisted.matches.length > 0) {
+          setSportmonksActiveMatches(persisted.matches);
+        }
+      }
+    });
+
+    const unsubscribe = subscribeToLiveMatches((snapshot) => {
+      if (!snapshot) return;
+
+      if (snapshot.scores) {
+        const scoresMap = new Map<number, number>();
+        Object.entries(snapshot.scores).forEach(([idStr, pts]) => {
+          scoresMap.set(Number(idStr), Number(pts));
+        });
+        setSportmonksScores(scoresMap);
+
+        // Actualizăm masterPlayers reactiv
+        setMasterPlayers((prev) =>
+          prev.map((player) => {
+            if (player.sportmonksId && scoresMap.has(player.sportmonksId)) {
+              return { ...player, pointsMatchday: scoresMap.get(player.sportmonksId)! };
+            }
+            return player;
+          })
+        );
+      }
+
+      if (snapshot.playerDetails) {
+        const detailsMap = new Map<number, any>();
+        Object.entries(snapshot.playerDetails).forEach(([idStr, det]) => {
+          detailsMap.set(Number(idStr), det);
+        });
+        setSportmonksPlayerDetails(detailsMap);
+      }
+
+      if (snapshot.matches) {
+        setSportmonksActiveMatches(snapshot.matches);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // 2. Coordonator Polling Sportmonks (Admin / Creator Only sau la cerere)
+  // Elimină complet riscul de 429 Too Many Requests: un singur canal apelează Sportmonks la 30s!
+  const isCoordinator = user.membership === 'admin' || user.membership === 'creator';
+
+  useEffect(() => {
+    if (!isCoordinator) {
+      setIsSportmonksPolling(false);
+      return;
+    }
+
+    setIsSportmonksPolling(true);
+    SportmonksLiveService.startPolling((liveScores, rawDetails, activeMatches) => {
+      setSportmonksScores(new Map(liveScores));
+      if (rawDetails) {
+        setSportmonksPlayerDetails(new Map(rawDetails));
+      }
+      if (activeMatches) {
+        setSportmonksActiveMatches([...activeMatches]);
+      }
+
+      if (liveScores && liveScores.size > 0) {
+        setMasterPlayers((prev) =>
+          prev.map((player) => {
+            if (player.sportmonksId && liveScores.has(player.sportmonksId)) {
+              const livePts = liveScores.get(player.sportmonksId)!;
+              return { ...player, pointsMatchday: livePts };
+            }
+            return player;
+          })
+        );
+      }
+    });
+
+    return () => {
+      SportmonksLiveService.stopPolling();
+      setIsSportmonksPolling(false);
+    };
+  }, [isCoordinator]);
+
 
   // Save to localStorage
   useEffect(() => {
@@ -862,6 +1076,141 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
     setNewsArticles((prev) => [newArt, ...prev]);
   }, []);
+
+  // Finalizează un meci imediat și scrie definitiv în Firestore
+  const finalizeMatchNow = useCallback(async (fixtureId: string | number) => {
+    const fixKey = String(fixtureId);
+    const targetPending = pendingFinalizations.find((p) => p.fixtureId === fixKey);
+
+    const fixture = fixtures.find((f) => f.id === fixKey) || {
+      id: fixKey,
+      homeClubId: targetPending?.homeClubId || 'c_fcsb',
+      awayClubId: targetPending?.awayClubId || 'c_rapid',
+      homeScore: targetPending?.homeScore ?? 2,
+      awayScore: targetPending?.awayScore ?? 1,
+      events: [],
+    };
+
+    const playerLiveMap: Record<string, any> = {};
+    players.forEach((p) => {
+      if (p.clubId === fixture.homeClubId || p.clubId === fixture.awayClubId) {
+        const smDetails = p.sportmonksId ? sportmonksPlayerDetails.get(p.sportmonksId) : null;
+        playerLiveMap[p.id] = {
+          minutesPlayed: smDetails?.minutes ?? (p.pointsMatchday > 0 ? 90 : 75),
+          isStarter: true,
+          pointsMatchday: p.pointsMatchday,
+          sportmonksDetails: smDetails?.details || [],
+          events: fixture.events?.filter((ev) => ev.playerId === p.id) || [],
+        };
+      }
+    });
+
+    const result = await MatchFinalizerService.finalizeMatch(
+      {
+        fixtureId: fixKey,
+        gameweek: 15,
+        homeClubId: fixture.homeClubId,
+        awayClubId: fixture.awayClubId,
+        homeScore: fixture.homeScore,
+        awayScore: fixture.awayScore,
+        playerLiveMap,
+      },
+      players
+    );
+
+    if (result.success) {
+      setFinalizedMatchIds((prev) => Array.from(new Set([...prev, fixKey])));
+      setPendingFinalizations((prev) => prev.filter((p) => p.fixtureId !== fixKey));
+      addNotification({
+        title: '🏁 Meci Finalizat & Puncte Salvate Definitiv',
+        message: result.message,
+        type: 'reward',
+      });
+    }
+
+    return { success: result.success, message: result.message };
+  }, [pendingFinalizations, fixtures, players, sportmonksPlayerDetails, addNotification]);
+
+  // Simulează fluierul final pentru un meci (declanșează timerul de 5 minute)
+  const simulateFinishedMatchFT = useCallback((fixtureId: string = 'fix_1', homeScore: number = 2, awayScore: number = 1) => {
+    const fixture = fixtures.find((f) => f.id === fixtureId);
+    const homeClubId = fixture?.homeClubId || 'c_fcsb';
+    const awayClubId = fixture?.awayClubId || 'c_rapid';
+
+    setPendingFinalizations((prev) => {
+      if (prev.some((p) => p.fixtureId === fixtureId)) return prev;
+      return [
+        ...prev,
+        {
+          fixtureId,
+          homeClubId,
+          awayClubId,
+          homeScore,
+          awayScore,
+          scheduledTime: Date.now() + 5 * 60 * 1000,
+          secondsRemaining: 300, // 5 minute
+        },
+      ];
+    });
+
+    addNotification({
+      title: '⏱️ Meci Încheiat (FT) — Salvare Programată',
+      message: `Partida s-a încheiat! Punctele contextuale și statisticile se vor salva definitiv în Firestore peste 5 minute.`,
+      type: 'live_event',
+    });
+  }, [fixtures, addNotification]);
+
+  // Timer loop: decrementare fiecare secundă pentru pending finalizations
+  useEffect(() => {
+    if (pendingFinalizations.length === 0) return;
+
+    const interval = setInterval(() => {
+      setPendingFinalizations((prev) => {
+        const nextList: typeof prev = [];
+        for (const item of prev) {
+          const nextSeconds = item.secondsRemaining - 1;
+          if (nextSeconds <= 0) {
+            // Declanșare automată a salvării
+            finalizeMatchNow(item.fixtureId);
+          } else {
+            nextList.push({ ...item, secondsRemaining: nextSeconds });
+          }
+        }
+        return nextList;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [pendingFinalizations, finalizeMatchNow]);
+
+  // Ascultare meciuri Sportmonks cu status FT / ENDED pentru declanșare automată
+  useEffect(() => {
+    if (!sportmonksActiveMatches || sportmonksActiveMatches.length === 0) return;
+    sportmonksActiveMatches.forEach((m: any) => {
+      const statusName = m.state?.state || m.status;
+      if (statusName === 'FT' || statusName === 'ENDED' || statusName === 'AET') {
+        const fId = String(m.id);
+        if (!MatchFinalizerService.isFixtureFinalized(fId)) {
+          setPendingFinalizations((prev) => {
+            if (prev.some((p) => p.fixtureId === fId)) return prev;
+            return [
+              ...prev,
+              {
+                fixtureId: fId,
+                homeClubId: m.participants?.[0]?.id ? `c_${m.participants[0].id}` : 'c_fcsb',
+                awayClubId: m.participants?.[1]?.id ? `c_${m.participants[1].id}` : 'c_rapid',
+                homeScore: m.scores?.find((s: any) => s.description === 'CURRENT')?.score?.participant1 ?? 0,
+                awayScore: m.scores?.find((s: any) => s.description === 'CURRENT')?.score?.participant2 ?? 0,
+                scheduledTime: Date.now() + 5 * 60 * 1000,
+                secondsRemaining: 300,
+              },
+            ];
+          });
+        }
+      }
+    });
+  }, [sportmonksActiveMatches]);
+
 
   // Compute Empty Starter Slots Count & Penalties (-100p per empty slot)
   const emptyStarterSlotsCount = useMemo(() => {
@@ -2653,42 +3002,40 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setUser((prev) => ({ ...prev, membership }));
   };
 
-  // 3-MINUTE DEMO MATCH ENGINE
+  // 1-MINUTE DEMO MATCH ENGINE
   const startDemoMatch = useCallback(() => {
     setIsDemoMatchActive(true);
-    setDemoTimeRemaining(180);
+    setDemoTimeRemaining(60);
     setDemoMinute(1);
     setDemoHomeScore(0);
     setDemoAwayScore(0);
-    setDemoEvents([
-      {
-        id: `demo_start_${Date.now()}`,
-        minute: 1,
-        type: 'starter_bonus',
-        playerId: 'sys_start',
-        playerName: 'SuperManager Live',
-        clubId: 'c_superliga',
-        pointsChange: 0,
-        description: 'Fluier de start în Meciul Demo! Partida a început cu fotbaliștii din lotul tău.',
-      },
-    ]);
+    setDemoEvents([]);
+    setDemoEventsByPlayer({});
+    setPendingDemoMatchSave(null);
+    setShowDemoSaveModal(false);
+    // Resetăm punctele etapei la 0 pentru a începe simularea proaspătă
+    setPlayers((prev) => prev.map((p) => ({ ...p, pointsMatchday: 0 })));
     addNotification({
-      title: '🎮 Meci Demo Pornit (3 Minute)!',
-      message: 'Meciul simulat rulează accelerat (3 minute = 90 min de joc real) cu fotbaliștii din lotul tău.',
+      title: '🎮 Meci Demo Pornit (1 Minut)!',
+      message: 'Meciul simulat rulează accelerat (1 minut = 90 min de joc real) cu fotbaliștii din lotul tău.',
       type: 'live_event',
     });
   }, [addNotification]);
 
   const resetDemoMatch = useCallback(() => {
     setIsDemoMatchActive(false);
-    setDemoTimeRemaining(180);
+    setDemoTimeRemaining(60);
     setDemoMinute(0);
     setDemoHomeScore(0);
     setDemoAwayScore(0);
     setDemoEvents([]);
+    setDemoEventsByPlayer({});
+    setPendingDemoMatchSave(null);
+    setShowDemoSaveModal(false);
+    setPlayers((prev) => prev.map((p) => ({ ...p, pointsMatchday: 0 })));
   }, []);
 
-  // Accelerated 3-Minute Real-Time Demo Match Timer Loop
+  // Accelerated 1-Minute Real-Time Demo Match Timer Loop
   useEffect(() => {
     if (!isDemoMatchActive) return;
 
@@ -2698,34 +3045,88 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
           clearInterval(interval);
           setIsDemoMatchActive(false);
           setDemoMinute(90);
-          setDemoEvents((prev) => [
+
+          // Scorurile finale obținute în meciul de 1 minut
+          let finalHome = 0;
+          let finalAway = 0;
+          setDemoHomeScore((h) => {
+            finalHome = h;
+            return h;
+          });
+          setDemoAwayScore((a) => {
+            finalAway = a;
+            return a;
+          });
+
+          // Punctaj rezultat echipă: Victorie (+15p), Egal (+5p), Înfrângere (-15p)
+          const resultPts = finalHome > finalAway ? 15 : finalHome === finalAway ? 5 : -15;
+          const resultLabel = finalHome > finalAway ? 'Meci câștigat' : finalHome === finalAway ? 'Meci egal' : 'Meci pierdut';
+          const isCleanSheet = finalAway === 0;
+
+          const starters = Object.values(squad.startingSlots).filter(Boolean) as string[];
+          const squadIds = starters.length > 0 ? starters : squad.benchPlayerIds;
+          const squadPool = players.filter((p) => squadIds.includes(p.id));
+
+          // Mapare bonusuri per jucător
+          const playerBonusesMap: Record<
+            string,
             {
-              id: `demo_end_${Date.now()}`,
-              minute: 90,
-              type: 'match_won',
-              playerId: 'sys_end',
-              playerName: 'SuperManager Live',
-              clubId: 'c_superliga',
-              pointsChange: 0,
-              description: 'Fluier Final! Meciul Demo s-a încheiat. Punctele fotbaliștilor tăi au fost calculate!',
-            },
-            ...prev,
-          ]);
+              totalBonus: number;
+              starterBonus: number;
+              minutesBonus: number;
+              cleanSheetBonus: number;
+              resultPts: number;
+              finalPoints: number;
+            }
+          > = {};
+
+          squadPool.forEach((p) => {
+            const isStarter = starters.includes(p.id);
+            const starterBonus = isStarter ? 5 : 3;
+            const minutesBonus = 2; // peste 60 min
+            const cleanSheetBonus = isCleanSheet ? (p.position === 'GK' ? 30 : p.position === 'DEF' ? 15 : 0) : 0;
+            const totalBonus = starterBonus + minutesBonus + resultPts + cleanSheetBonus;
+
+            playerBonusesMap[p.id] = {
+              totalBonus,
+              starterBonus,
+              minutesBonus,
+              cleanSheetBonus,
+              resultPts,
+              finalPoints: p.pointsMatchday + totalBonus,
+            };
+          });
+
+          // Stocăm datele pentru confirmarea din fereastra modală
+          setPendingDemoMatchSave({
+            homeScore: finalHome,
+            awayScore: finalAway,
+            resultPts,
+            resultLabel,
+            isCleanSheet,
+            playerBonuses: playerBonusesMap,
+            timestamp: Date.now(),
+          });
+
+          // Deschidem fereastra modală de confirmare salvare
+          setShowDemoSaveModal(true);
+
           addNotification({
             title: '🏁 Fluier Final în Meciul Demo!',
-            message: 'Meciul de 3 minute s-a încheiat! Verifică punctele acumulate de jucători.',
+            message: `Scor ${finalHome}-${finalAway}. Alege dacă dorești să salvezi datele în Firestore sau să anulezi testul.`,
             type: 'reward',
           });
+
           return 0;
         }
 
         const nextRemaining = prevRemaining - 1;
-        const elapsed = 180 - nextRemaining;
-        const currentMatchMin = Math.min(90, Math.max(1, Math.floor((elapsed / 180) * 90)));
+        const elapsed = 60 - nextRemaining;
+        const currentMatchMin = Math.min(90, Math.max(1, Math.floor((elapsed / 60) * 90)));
         setDemoMinute(currentMatchMin);
 
-        // Realistic event cadence: trigger event with ~22% chance per second (~18-20 events total in 3 min)
-        if (Math.random() < 0.22) {
+        // Declanșare evenimente: frecvență ridicată ~70% pe secundă pentru 1 minut dinamic
+        if (Math.random() < 0.70) {
           const starters = Object.values(squad.startingSlots).filter(Boolean) as string[];
           const squadIds = starters.length > 0 ? starters : squad.benchPlayerIds;
           const squadPool = players.filter((p) => squadIds.includes(p.id));
@@ -2734,55 +3135,149 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
             : players[0];
 
           if (targetPlayer) {
-            const isGK = targetPlayer.position === 'GK';
-            const isDEF = targetPlayer.position === 'DEF';
-            const isMID = targetPlayer.position === 'MID';
-
-            type EventOption = {
+            type DemoAction = {
               type: MatchEventType;
-              desc: string;
+              label: string;
               points: number;
               statKey?: keyof PlayerStats;
               isHomeGoal?: boolean;
               isAwayGoal?: boolean;
             };
 
-            const options: EventOption[] = [];
+            const options: DemoAction[] = [];
+            const pos = targetPlayer.position;
 
-            if (isGK) {
+            if (pos === 'GK') {
+              // Pozitive (65%)
               options.push(
-                { type: 'penalty_save', desc: `Paradă de senzație! ${targetPlayer.name} respinge spectaculos un penalty!`, points: 75, statKey: 'penaltySaves' },
-                { type: 'save', desc: `${targetPlayer.name} reține cu siguranță o minge periculoasă la colțul lung.`, points: 20, statKey: 'cleanSheets' },
-                { type: 'pass_forward', desc: `Degajare milimetrică reușită de ${targetPlayer.name} pentru contraatac.`, points: 5, statKey: 'passesCompleted' }
+                { type: 'save', label: 'Paradă', points: 5, statKey: 'cleanSheets' },
+                { type: 'save_in_box', label: 'Paradă șut din careu', points: 10, statKey: 'cleanSheets' },
+                { type: 'keeper_sweeper', label: 'Ieșire din poartă', points: 5 },
+                { type: 'high_claim', label: 'Minge înaltă prinsă', points: 3 },
+                { type: 'punch', label: 'Minge boxată', points: 3 },
+                { type: 'pass_forward', label: 'Pasă în teren advers', points: 1, statKey: 'passesCompleted' }
               );
-            } else if (isDEF) {
+              if (Math.random() < 0.15) {
+                options.push({ type: 'penalty_save', label: 'Paradă penalty', points: 25, statKey: 'penaltySaves' });
+              }
+              // Negative (35%)
               options.push(
-                { type: 'tackle', desc: `Intervenție de clasă prin alunecare a lui ${targetPlayer.name}!`, points: 15, statKey: 'tacklesWon' },
-                { type: 'recovery', desc: `${targetPlayer.name} recuperează și pasează sigur în linia mediană.`, points: 8, statKey: 'recoveries' },
-                { type: 'foul', desc: `Fault comis de ${targetPlayer.name} pentru oprirea unei faze periculoase.`, points: -6, statKey: 'foulsCommitted' },
-                { type: 'yellow_card', desc: `Cartonaș galben primit de ${targetPlayer.name} în minutul ${currentMatchMin}.`, points: -15, statKey: 'yellowCards' }
+                { type: 'pass_error', label: 'Pasă greșită', points: -1 },
+                { type: 'foul', label: 'Fault comis', points: -3, statKey: 'foulsCommitted' }
               );
-            } else if (isMID) {
+              if (Math.random() < 0.08) {
+                options.push({ type: 'yellow_card', label: 'Cartonaș galben', points: -15, statKey: 'yellowCards' });
+              }
+              if (Math.random() < 0.05) {
+                options.push({ type: 'penalty_conceded', label: 'Penalty comis', points: -25 });
+              }
+            } else if (pos === 'DEF') {
+              // Pozitive (65%)
               options.push(
-                { type: 'key_pass', desc: `Pasă luminoasă printre linii expediată de ${targetPlayer.name}.`, points: 15, statKey: 'keyPasses' },
-                { type: 'shot_on_target', desc: `Șut cadrat periculos pe spațiul porții expediat de ${targetPlayer.name}!`, points: 12, statKey: 'shotsOnTarget' },
-                { type: 'recovery', desc: `Presing sufocant și minge câștigată de ${targetPlayer.name}.`, points: 10, statKey: 'recoveries' },
-                { type: 'assist', desc: `Assist genial semnat de ${targetPlayer.name}!`, points: 35, statKey: 'assists', isHomeGoal: true }
+                { type: 'tackle', label: 'Deposedare reușită', points: 5, statKey: 'tacklesWon' },
+                { type: 'clearance', label: 'Respingere', points: 5 },
+                { type: 'interception', label: 'Intercepție', points: 5, statKey: 'recoveries' },
+                { type: 'duel_won', label: 'Duel câștigat', points: 3 },
+                { type: 'aerial_won', label: 'Duel aerian câștigat', points: 3 },
+                { type: 'shot_blocked', label: 'Șut blocat', points: 3 },
+                { type: 'pass_forward', label: 'Pasă în teren advers', points: 1, statKey: 'passesCompleted' },
+                { type: 'long_pass', label: 'Pasă lungă', points: 3 },
+                { type: 'foul_drawn', label: 'Fault obținut', points: 1, statKey: 'foulsDrawn' }
               );
+              if (Math.random() < 0.08) {
+                options.push({ type: 'goal_line_clearance', label: 'Respingere pe linia porții', points: 25 });
+              }
+              if (Math.random() < 0.08) {
+                options.push({ type: 'goal', label: 'Gol marcat', points: 50, statKey: 'goals', isHomeGoal: true });
+              }
+              // Negative (35%)
+              options.push(
+                { type: 'duel_lost', label: 'Duel pierdut', points: -1 },
+                { type: 'aerial_lost', label: 'Duel aerian pierdut', points: -1 },
+                { type: 'dribbled_past', label: 'Driblat de adversar', points: -3 },
+                { type: 'pass_error', label: 'Pasă greșită', points: -1 },
+                { type: 'foul', label: 'Fault comis', points: -3, statKey: 'foulsCommitted' }
+              );
+              if (Math.random() < 0.09) {
+                options.push({ type: 'yellow_card', label: 'Cartonaș galben', points: -15, statKey: 'yellowCards' });
+              }
+              if (Math.random() < 0.04) {
+                options.push({ type: 'penalty_conceded', label: 'Penalty comis', points: -25 });
+              }
+            } else if (pos === 'MID') {
+              // Pozitive (65%)
+              options.push(
+                { type: 'pass_forward', label: 'Pasă în teren advers', points: 1, statKey: 'passesCompleted' },
+                { type: 'key_pass', label: 'Pasă cheie', points: 5, statKey: 'keyPasses' },
+                { type: 'long_pass', label: 'Pasă lungă', points: 3 },
+                { type: 'cross_successful', label: 'Centrare reușită', points: 3 },
+                { type: 'dribble_success', label: 'Dribling reușit', points: 5 },
+                { type: 'shot_on_target', label: 'Șut pe poartă', points: 10, statKey: 'shotsOnTarget' },
+                { type: 'tackle', label: 'Deposedare reușită', points: 5, statKey: 'tacklesWon' },
+                { type: 'interception', label: 'Intercepție', points: 5, statKey: 'recoveries' },
+                { type: 'duel_won', label: 'Duel câștigat', points: 3 },
+                { type: 'foul_drawn', label: 'Fault obținut', points: 1, statKey: 'foulsDrawn' }
+              );
+              if (Math.random() < 0.12) {
+                options.push({ type: 'assist', label: 'Pasă de gol', points: 30, statKey: 'assists', isHomeGoal: true });
+              }
+              if (Math.random() < 0.09) {
+                options.push({ type: 'goal', label: 'Gol marcat', points: 50, statKey: 'goals', isHomeGoal: true });
+              }
+              // Negative (35%)
+              options.push(
+                { type: 'pass_error', label: 'Pasă greșită', points: -1 },
+                { type: 'dispossessed', label: 'Deposedat de minge', points: -3 },
+                { type: 'shot_missed', label: 'Șut ratat', points: -3 },
+                { type: 'duel_lost', label: 'Duel pierdut', points: -1 },
+                { type: 'dribbled_past', label: 'Driblat de adversar', points: -3 },
+                { type: 'foul', label: 'Fault comis', points: -3, statKey: 'foulsCommitted' }
+              );
+              if (Math.random() < 0.08) {
+                options.push({ type: 'yellow_card', label: 'Cartonaș galben', points: -15, statKey: 'yellowCards' });
+              }
             } else {
               // FWD
+              // Pozitive (65%)
               options.push(
-                { type: 'shot_on_target', desc: `${targetPlayer.name} fentează elegant și trage puternic!`, points: 15, statKey: 'shotsOnTarget' },
-                { type: 'goal', desc: `⚽ GOOOL MAGNIFIC! ${targetPlayer.name} înscrie cu un șut la vinclu!`, points: 50, statKey: 'goals', isHomeGoal: true },
-                { type: 'foul_drawn', desc: `${targetPlayer.name} scoate o lovitură liberă la marginea careului.`, points: 8, statKey: 'foulsDrawn' }
+                { type: 'shot_on_target', label: 'Șut pe poartă', points: 10, statKey: 'shotsOnTarget' },
+                { type: 'key_pass', label: 'Pasă cheie', points: 5, statKey: 'keyPasses' },
+                { type: 'dribble_success', label: 'Dribling reușit', points: 5 },
+                { type: 'duel_won', label: 'Duel câștigat', points: 3 },
+                { type: 'aerial_won', label: 'Duel aerian câștigat', points: 3 },
+                { type: 'pass_forward', label: 'Pasă în teren advers', points: 1, statKey: 'passesCompleted' },
+                { type: 'foul_drawn', label: 'Fault obținut', points: 1, statKey: 'foulsDrawn' }
               );
+              if (Math.random() < 0.14) {
+                options.push({ type: 'goal', label: 'Gol marcat', points: 50, statKey: 'goals', isHomeGoal: true });
+              }
+              if (Math.random() < 0.10) {
+                options.push({ type: 'assist', label: 'Pasă de gol', points: 30, statKey: 'assists', isHomeGoal: true });
+              }
+              if (Math.random() < 0.08) {
+                options.push({ type: 'penalty_won', label: 'Penalty obținut', points: 25 });
+              }
+              // Negative (35%)
+              options.push(
+                { type: 'shot_missed', label: 'Șut ratat', points: -3 },
+                { type: 'dispossessed', label: 'Deposedat de minge', points: -3 },
+                { type: 'duel_lost', label: 'Duel pierdut', points: -1 },
+                { type: 'pass_error', label: 'Pasă greșită', points: -1 },
+                { type: 'foul', label: 'Fault comis', points: -3, statKey: 'foulsCommitted' }
+              );
+              if (Math.random() < 0.10) {
+                options.push({ type: 'big_chance_missed', label: 'Ocazie mare ratată', points: -15 });
+              }
+              if (Math.random() < 0.07) {
+                options.push({ type: 'yellow_card', label: 'Cartonaș galben', points: -15, statKey: 'yellowCards' });
+              }
             }
 
-            // Rare opponent goal for realistic scoreline
-            if (Math.random() < 0.2) {
+            // Oponenți (posibilitate gol adversar)
+            if (Math.random() < 0.07) {
               options.push({
                 type: 'goal',
-                desc: 'Adversarii finalizează un atac rapid și marchează.',
+                label: 'Gol marcat',
                 points: -10,
                 isAwayGoal: true,
               });
@@ -2793,20 +3288,35 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
             if (chosen.isHomeGoal) setDemoHomeScore((s) => s + 1);
             if (chosen.isAwayGoal) setDemoAwayScore((s) => s + 1);
 
+            const isAway = Boolean(chosen.isAwayGoal);
+            const pName = isAway ? 'Oponenți' : targetPlayer.name;
+            const pId = isAway ? 'opp_rival' : targetPlayer.id;
+            const cId = isAway ? 'c_opp' : targetPlayer.clubId;
+
+            // FĂRĂ COMENTARIU: strict Nume – Acțiune
+            const evDescription = `${pName} – ${chosen.label}`;
+
             const ev: MatchLiveEvent = {
               id: `demo_ev_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
               minute: currentMatchMin,
               type: chosen.type,
-              playerId: chosen.isAwayGoal ? 'opp_rival' : targetPlayer.id,
-              playerName: chosen.isAwayGoal ? 'Oponenți' : targetPlayer.name,
-              clubId: chosen.isAwayGoal ? 'c_opp' : targetPlayer.clubId,
+              playerId: pId,
+              playerName: pName,
+              clubId: cId,
               pointsChange: chosen.points,
-              description: chosen.desc,
+              description: evDescription,
             };
 
             setDemoEvents((prev) => [ev, ...prev]);
 
-            if (!chosen.isAwayGoal) {
+            if (!isAway) {
+              // Populează evenimentul direct pe profilul fotbalistului titular
+              setDemoEventsByPlayer((prev) => ({
+                ...prev,
+                [targetPlayer.id]: [ev, ...(prev[targetPlayer.id] || [])],
+              }));
+
+              // Doar creșterea / scăderea punctajului pe cardul titularului (fără indicatori suplimentari)
               setPlayers((prev) =>
                 prev.map((p) => {
                   if (p.id === targetPlayer.id) {
@@ -2816,7 +3326,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
                     }
                     return {
                       ...p,
-                      pointsMatchday: Math.max(0, p.pointsMatchday + chosen.points),
+                      pointsMatchday: p.pointsMatchday + chosen.points,
                       pointsTotal: p.pointsTotal + chosen.points,
                       stats: updatedStats,
                     };
@@ -2834,6 +3344,224 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     return () => clearInterval(interval);
   }, [isDemoMatchActive, squad, players, addNotification]);
+
+  // Confirmă salvarea în Firestore din fereastra modală
+  const confirmSaveDemoMatch = useCallback(async () => {
+    if (!pendingDemoMatchSave) return;
+
+    const { homeScore, awayScore, resultPts, resultLabel, isCleanSheet, playerBonuses } = pendingDemoMatchSave;
+    const starters = Object.values(squad.startingSlots).filter(Boolean) as string[];
+
+    // 1. Creează evenimentele post-whistle pe fiecare jucător
+    const postEvents: MatchLiveEvent[] = [];
+    const newPlayerEventsMap = { ...demoEventsByPlayer };
+
+    Object.entries(playerBonuses).forEach(([pId, bonusData]) => {
+      const p = players.find((pl) => pl.id === pId);
+      if (!p) return;
+      const isStarter = starters.includes(pId);
+      const starterLabel = isStarter ? 'Titular în meci' : 'Intrat de pe bancă';
+
+      const pEvents: MatchLiveEvent[] = [
+        {
+          id: `demo_post_start_${pId}_${Date.now()}`,
+          minute: 90,
+          type: isStarter ? 'starter_bonus' : 'substitute_in_bonus',
+          playerId: pId,
+          playerName: p.name,
+          clubId: p.clubId,
+          pointsChange: bonusData.starterBonus,
+          description: `${p.name} – ${starterLabel}`,
+        },
+        {
+          id: `demo_post_min_${pId}_${Date.now()}`,
+          minute: 90,
+          type: 'minutes_bonus',
+          playerId: pId,
+          playerName: p.name,
+          clubId: p.clubId,
+          pointsChange: bonusData.minutesBonus,
+          description: `${p.name} – Minute jucate (90')`,
+        },
+      ];
+
+      if (bonusData.cleanSheetBonus > 0) {
+        pEvents.push({
+          id: `demo_post_cs_${pId}_${Date.now()}`,
+          minute: 90,
+          type: 'clean_sheet_bonus',
+          playerId: pId,
+          playerName: p.name,
+          clubId: p.clubId,
+          pointsChange: bonusData.cleanSheetBonus,
+          description: `${p.name} – Poartă intactă (Clean Sheet)`,
+        });
+      }
+
+      pEvents.push({
+        id: `demo_post_res_${pId}_${Date.now()}`,
+        minute: 90,
+        type: resultPts > 0 ? 'match_won' : resultPts === 5 ? 'match_draw' : 'match_lost',
+        playerId: pId,
+        playerName: p.name,
+        clubId: p.clubId,
+        pointsChange: resultPts,
+        description: `${p.name} – ${resultLabel}`,
+      });
+
+      postEvents.push(...pEvents);
+      newPlayerEventsMap[pId] = [...pEvents, ...(newPlayerEventsMap[pId] || [])];
+    });
+
+    setDemoEvents((prev) => [...postEvents, ...prev]);
+    setDemoEventsByPlayer(newPlayerEventsMap);
+
+    // 2. Actualizează jucătorii cu punctele finale și comprimă istoricul
+    setPlayers((prev) =>
+      prev.map((p) => {
+        const bonus = playerBonuses[p.id];
+        if (bonus) {
+          const finalPts = bonus.finalPoints;
+
+          const newHistory = [...(p.matchHistory || [])];
+          if (p.lastMatchDetails) {
+            const prevDetails = p.lastMatchDetails;
+            newHistory.unshift({
+              matchday: prevDetails.gameweek,
+              opponentClubId: prevDetails.opponentClubId,
+              result: prevDetails.contextualPoints.result > 0 ? 'V' : prevDetails.contextualPoints.result === 0 ? 'E' : 'Î',
+              minutesPlayed: prevDetails.minutesPlayed,
+              points: prevDetails.points,
+              goals: Number(prevDetails.detailedStats?.goals || 0),
+              assists: Number(prevDetails.detailedStats?.assists || 0),
+              rating: prevDetails.points > 30 ? 8.5 : prevDetails.points > 15 ? 7.5 : 6.0,
+              eventsSummary: `Puncte: ${prevDetails.points}p (${prevDetails.minutesPlayed}')`,
+            });
+          }
+
+          const updatedLastDetails: PlayerLastMatchDetails = {
+            fixtureId: 'demo_match',
+            opponentClubId: 'c_superliga_allstars',
+            gameweek: 15,
+            points: finalPts,
+            minutesPlayed: 90,
+            contextualPoints: {
+              starter: bonus.starterBonus,
+              minutes: bonus.minutesBonus,
+              cleanSheet: bonus.cleanSheetBonus,
+              result: bonus.resultPts,
+            },
+            detailedStats: {
+              goals: Number(p.stats?.goals || 0),
+              assists: Number(p.stats?.assists || 0),
+              shotsOnTarget: Number(p.stats?.shotsOnTarget || 0),
+              tacklesWon: Number(p.stats?.tacklesWon || 0),
+              recoveries: Number(p.stats?.recoveries || 0),
+              passesCompleted: Number(p.stats?.passesCompleted || 0),
+            },
+            breakdownPoints: {
+              actionPoints: Math.max(0, p.pointsMatchday),
+              cleanSheet: bonus.cleanSheetBonus,
+              starter: bonus.starterBonus,
+              minutes: bonus.minutesBonus,
+              result: bonus.resultPts,
+            },
+            finalizedAt: new Date().toISOString(),
+          };
+
+          return {
+            ...p,
+            pointsMatchday: finalPts,
+            pointsTotal: p.pointsTotal + bonus.totalBonus,
+            lastMatchPoints: finalPts,
+            lastMatchDetails: updatedLastDetails,
+            matchHistory: newHistory.slice(0, 10),
+          };
+        }
+        return p;
+      })
+    );
+
+    // 3. Persistă definitiv în Firestore prin serviciul de finalizare
+    await finalizeMatchNow('demo_match');
+
+    setShowDemoSaveModal(false);
+    setPendingDemoMatchSave(null);
+
+    addNotification({
+      title: '💾 Date Salvate în Baza de Date',
+      message: 'Punctele fotbaliștilor și statisticile meciului au fost salvate definitiv în Firestore!',
+      type: 'reward',
+    });
+  }, [pendingDemoMatchSave, squad.startingSlots, demoEventsByPlayer, players, finalizeMatchNow, addNotification]);
+
+  // Anulează salvarea meciului demo și resetează datele
+  const cancelDemoMatch = useCallback(() => {
+    // Resetează punctele acumulate în meciul demo înapoi la 0
+    setPlayers((prev) =>
+      prev.map((p) => ({
+        ...p,
+        pointsMatchday: 0,
+      }))
+    );
+    setDemoEvents([]);
+    setDemoEventsByPlayer({});
+    setDemoHomeScore(0);
+    setDemoAwayScore(0);
+    setDemoMinute(0);
+    setPendingDemoMatchSave(null);
+    setShowDemoSaveModal(false);
+
+    addNotification({
+      title: '❌ Test Anulat & Puncte Resetate',
+      message: 'Datele meciului demo nu au fost salvate în baza de date. Punctele au revenit la zero pentru un nou test.',
+      type: 'reward',
+    });
+  }, [addNotification]);
+
+  // Resetare completă a datelor etapei la zero (pentru meciuri reale curate)
+  const resetMatchdayDataToZero = useCallback(() => {
+    // 1. Resetează toate meciurile la 0-0 fără evenimente
+    setFixtures((prev) =>
+      prev.map((f) => ({
+        ...f,
+        homeScore: 0,
+        awayScore: 0,
+        minute: 0,
+        isLive: false,
+        isFinished: false,
+        events: [],
+      }))
+    );
+    // 2. Resetează punctele de etapă ale tuturor jucătorilor la 0
+    setMasterPlayers((prev) =>
+      prev.map((p) => ({
+        ...p,
+        pointsMatchday: 0,
+      }))
+    );
+    // 3. Resetează meciul demo dacă era activ
+    setIsDemoMatchActive(false);
+    setDemoTimeRemaining(60);
+    setDemoMinute(0);
+    setDemoHomeScore(0);
+    setDemoAwayScore(0);
+    setDemoEvents([]);
+    setDemoEventsByPlayer({});
+    setPendingDemoMatchSave(null);
+    setShowDemoSaveModal(false);
+
+    try {
+      localStorage.removeItem(`${STORAGE_KEY}_fixtures`);
+      localStorage.removeItem('supermanager_player_overrides');
+    } catch (e) { /* ignore */ }
+
+    addNotification({
+      title: '🧹 Date Etapă Resetate la Zero',
+      message: 'Toate scorurile meciurilor au fost resetate la 0-0, iar punctele fotbaliștilor sunt 0.',
+      type: 'reward',
+    });
+  }, [addNotification]);
 
   return (
     <FantasyContext.Provider
@@ -2919,8 +3647,25 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         demoHomeScore,
         demoAwayScore,
         demoEvents,
+        demoEventsByPlayer,
+        pendingDemoMatchSave,
+        showDemoSaveModal,
+        setShowDemoSaveModal,
+        confirmSaveDemoMatch,
+        cancelDemoMatch,
+        resetMatchdayDataToZero,
         startDemoMatch,
         resetDemoMatch,
+        sportmonksScores,
+        sportmonksPlayerDetails,
+        sportmonksActiveMatches,
+        isSportmonksPolling,
+        syncSportmonksPlayerIds,
+        refreshSportmonksLiveScores,
+        finalizedMatchIds,
+        pendingFinalizations,
+        finalizeMatchNow,
+        simulateFinishedMatchFT,
       }}
     >
       {children}

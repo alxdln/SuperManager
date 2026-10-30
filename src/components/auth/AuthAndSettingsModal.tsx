@@ -16,7 +16,9 @@ import {
   ShieldAlert,
   ArrowRight,
   Database,
+  FileSpreadsheet,
 } from 'lucide-react';
+import { GoogleSheetsExportModal } from '../common/GoogleSheetsExportModal';
 
 interface AuthAndSettingsModalProps {
   onClose: () => void;
@@ -61,6 +63,7 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
   // Login form state
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPass, setLoginPass] = useState('');
+  const [showSheetsModal, setShowSheetsModal] = useState(false);
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
@@ -251,6 +254,17 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
             >
               Salvează Numele Echipei
             </button>
+
+            <div className="pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowSheetsModal(true)}
+                className="w-full py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 border border-emerald-500/30 text-emerald-400 font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>Exportă Grilă &amp; Sportmonks în Google Sheets ↗</span>
+              </button>
+            </div>
           </form>
         )}
 
@@ -521,6 +535,10 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
           </div>
         )}
       </div>
+
+      {showSheetsModal && (
+        <GoogleSheetsExportModal onClose={() => setShowSheetsModal(false)} />
+      )}
     </div>
   );
 };

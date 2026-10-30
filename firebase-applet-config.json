@@ -1,12 +1,11 @@
 {
-  "projectId": "bustling-sign-98f9p",
-  "appId": "1:70437844190:web:2c683220a5a0fe8a51be4f",
-  "apiKey": "AIzaSyCLKQoJ1q9q6vUzEErOV27cx_WjRk6PjdQ",
-  "authDomain": "bustling-sign-98f9p.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-supermanagerromn-01d29af6-a169-4d70-bc4f-80623db89e6d",
-  "storageBucket": "bustling-sign-98f9p.firebasestorage.app",
-  "messagingSenderId": "70437844190",
+  "projectId": "gen-lang-client-0593648175",
+  "appId": "1:520737872509:web:4c86cbc669c2e086476f14",
+  "apiKey": "AIzaSyBIPwf00cB6-DeXQ4cZN8JOx2q9OtbESH8",
+  "authDomain": "gen-lang-client-0593648175.firebaseapp.com",
+  "storageBucket": "gen-lang-client-0593648175.firebasestorage.app",
+  "messagingSenderId": "520737872509",
   "measurementId": "",
-  "oAuthClientId": "70437844190-sl2mj9otq7ct1617ljhnkfg86ioim5hf.apps.googleusercontent.com",
+  "oAuthClientId": "520737872509-oiapl7h7pdvg6p3mmd5e0m8driq59vn9.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

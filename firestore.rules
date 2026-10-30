@@ -54,7 +54,20 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    match /saved_squads/{squadId} {
+    // Live match sync and gameweek scores persistence
+    match /live_matches/{docId} {
+      allow read, write: if true;
+    }
+
+    match /gameweek_scores/{docId} {
+      allow read, write: if true;
+    }
+
+    match /finalized_matches/{matchId} {
+      allow read, write: if true;
+    }
+
+    match /gameweek_results/{gwId}/{document=**} {
       allow read, write: if true;
     }
   }

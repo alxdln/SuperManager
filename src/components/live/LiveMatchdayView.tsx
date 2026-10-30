@@ -3,6 +3,7 @@ import { useFantasy } from '../../context/FantasyContext';
 import { SUPERLIGA_CLUBS, SUPERLIGA_STANDINGS } from '../../data/superligaData';
 import { Player, PlayerPosition, Fixture } from '../../types/football';
 import { PlayerLiveStreamModal } from './PlayerLiveStreamModal';
+import { DemoMatchSaveModal } from './DemoMatchSaveModal';
 import {
   Play,
   Pause,
@@ -21,6 +22,7 @@ import {
   Zap,
   AlertTriangle,
   Lock,
+  Trash2,
 } from 'lucide-react';
 import { formatCurrency, formatFullCurrency } from '../../utils/scoringEngine';
 import { getPlayerDisplayAvatar } from '../../utils/playerAvatar';
@@ -61,8 +63,20 @@ export const LiveMatchdayView: React.FC = () => {
     demoHomeScore,
     demoAwayScore,
     demoEvents,
+    demoEventsByPlayer,
+    pendingDemoMatchSave,
+    showDemoSaveModal,
+    setShowDemoSaveModal,
+    confirmSaveDemoMatch,
+    cancelDemoMatch,
+    resetMatchdayDataToZero,
     startDemoMatch,
     resetDemoMatch,
+    sportmonksScores,
+    sportmonksPlayerDetails,
+    sportmonksActiveMatches,
+    isSportmonksPolling,
+    refreshSportmonksLiveScores,
   } = useFantasy();
 
   // Primary tab is "myPlayers" as requested by user
@@ -262,7 +276,79 @@ export const LiveMatchdayView: React.FC = () => {
         </div>
       )}
 
-      {/* 3-Minute Demo Match Arena Card */}
+      {/* Real Sportmonks Inplay Matches (Live API Feed) */}
+      {sportmonksActiveMatches && sportmonksActiveMatches.length > 0 && (
+        <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-950/50 via-slate-900 to-slate-950 border border-amber-500/60 shadow-xl space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+              <h3 className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                <span>Meciuri Live Sportmonks (Inplay SuperLiga)</span>
+                <span className="bg-rose-600 text-white text-[8px] font-black px-1.5 py-0.2 rounded-full">
+                  LIVE API
+                </span>
+              </h3>
+            </div>
+            <button
+              onClick={refreshSportmonksLiveScores}
+              className="text-[10px] text-amber-300 hover:text-white font-mono bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700 flex items-center gap-1"
+            >
+              <span>Reîmprospătează (30s auto)</span>
+            </button>
+          </div>
+
+          {sportmonksActiveMatches.map((match: any, idx: number) => {
+            const homePart = match.participants?.[0] || { name: 'Gazde' };
+            const awayPart = match.participants?.[1] || { name: 'Oaspeți' };
+            const homeScore = match.scores?.find((s: any) => s.description === 'CURRENT' && s.score?.participant === 'home')?.score?.goals ?? 0;
+            const awayScore = match.scores?.find((s: any) => s.description === 'CURRENT' && s.score?.participant === 'away')?.score?.goals ?? 0;
+            const liveEvents = match.events || [];
+
+            return (
+              <div key={match.id || idx} className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2.5">
+                <div className="flex items-center justify-between text-center gap-2">
+                  <div className="flex-1 text-left min-w-0">
+                    <span className="text-xs font-black text-white truncate block">{homePart.name}</span>
+                    <span className="text-[10px] text-slate-400">Gazde</span>
+                  </div>
+                  <div className="px-3 shrink-0">
+                    <span className="font-mono text-xl font-black text-emerald-400">
+                      {homeScore} - {awayScore}
+                    </span>
+                    <span className="block text-[9px] font-bold text-amber-400 animate-pulse">
+                      {match.minute ? `${match.minute}' LIVE` : 'INPLAY'}
+                    </span>
+                  </div>
+                  <div className="flex-1 text-right min-w-0">
+                    <span className="text-xs font-black text-white truncate block">{awayPart.name}</span>
+                    <span className="text-[10px] text-slate-400">Oaspeți</span>
+                  </div>
+                </div>
+
+                {liveEvents.length > 0 && (
+                  <div className="space-y-1 max-h-36 overflow-y-auto pt-2 border-t border-slate-800/80">
+                    <span className="text-[9px] font-bold uppercase text-slate-400 block">
+                      Evenimente Extrase în Direct (events.type):
+                    </span>
+                    {liveEvents.slice(0, 6).map((ev: any, eIdx: number) => (
+                      <div key={ev.id || eIdx} className="text-[10px] text-slate-300 flex items-center justify-between">
+                        <span>
+                          {ev.minute}&apos; <b className="text-amber-300">{ev.type?.name || 'Eveniment'}</b> - {ev.player_name || ev.player?.display_name || 'Jucător'}
+                        </span>
+                        <span className="text-emerald-400 font-mono font-bold text-[9px] bg-slate-900 px-1 py-0.2 rounded">
+                          {ev.type?.code || 'STAT'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 1-Minute Demo Match Arena Card */}
       <div className={`p-4 rounded-2xl border transition-all ${
         isDemoMatchActive
           ? 'bg-gradient-to-br from-indigo-950/60 via-slate-900 to-emerald-950/40 border-emerald-500/50 shadow-lg shadow-emerald-500/10'
@@ -276,7 +362,7 @@ export const LiveMatchdayView: React.FC = () => {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-black uppercase tracking-wider text-white">
-                  Meci Demonstrativ (3 Minute)
+                  Meci Demonstrativ (1 Minut)
                 </span>
                 {isDemoMatchActive ? (
                   <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-rose-600 text-white animate-pulse">
@@ -289,13 +375,22 @@ export const LiveMatchdayView: React.FC = () => {
                 )}
               </div>
               <span className="text-[11px] text-slate-400 block mt-0.5">
-                Simulare realistă accelerată (3 min = 90 min de joc) cu fotbaliștii din lotul tău
+                Simulare accelerată 1 minut (60s = 90 min de joc) cu titularii tăi
               </span>
             </div>
           </div>
 
           {/* Action buttons */}
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={resetMatchdayDataToZero}
+              className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-rose-950/40 hover:text-rose-300 hover:border-rose-800/60 text-slate-400 font-bold text-xs border border-slate-700/80 inline-flex items-center gap-1.5 active:scale-95 transition-all"
+              title="Resetează scorurile la 0-0 și punctele fotbaliștilor la 0 pentru a testa pe curat"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Reset Date (0-0)</span>
+            </button>
+
             {isDemoMatchActive ? (
               <>
                 <button
@@ -320,7 +415,7 @@ export const LiveMatchdayView: React.FC = () => {
                 className="py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black uppercase tracking-wider text-xs shadow-lg shadow-emerald-500/25 inline-flex items-center gap-2 active:scale-95 transition-all"
               >
                 <Play className="w-4 h-4 fill-current" />
-                <span>Meci Demo</span>
+                <span>Meci Demo (1 min)</span>
               </button>
             )}
           </div>
@@ -370,32 +465,12 @@ export const LiveMatchdayView: React.FC = () => {
               </div>
             </div>
 
-            {/* Live Events Stream */}
-            {demoEvents.length > 0 && (
-              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block px-1">
-                  Flux Evenimente în Timp Real
-                </span>
-                {demoEvents.slice(0, 6).map((ev) => (
-                  <div
-                    key={ev.id}
-                    className="p-2 rounded-xl bg-slate-800/70 border border-slate-700/60 flex items-center justify-between gap-2 text-xs"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-mono text-[11px] font-bold text-amber-400 shrink-0">
-                        {ev.minute}&apos;
-                      </span>
-                      <span className="text-slate-200 text-xs truncate">{ev.description}</span>
-                    </div>
-                    {ev.pointsChange !== 0 && (
-                      <span className={`font-mono text-xs font-black shrink-0 ${ev.pointsChange > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {ev.pointsChange > 0 ? `+${ev.pointsChange}p` : `${ev.pointsChange}p`}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+            {/* Guidance for starter card population (No global livescore ticker) */}
+            <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-center">
+              <span className="text-xs text-slate-300 font-medium leading-relaxed block">
+                🎯 Evenimentele se transmit live direct pe cardurile titularilor tăi de mai jos. Apasă pe orice jucător titular pentru a vedea detaliat acțiunile și punctajul live!
+              </span>
+            </div>
           </div>
         )}
       </div>
@@ -1064,6 +1139,16 @@ export const LiveMatchdayView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Demo Match Final Save Modal Prompt */}
+      <DemoMatchSaveModal
+        isOpen={showDemoSaveModal}
+        data={pendingDemoMatchSave}
+        teamName={user.teamName}
+        starterPlayers={starterPlayers}
+        onConfirmSave={confirmSaveDemoMatch}
+        onCancel={cancelDemoMatch}
+      />
     </div>
   );
 };

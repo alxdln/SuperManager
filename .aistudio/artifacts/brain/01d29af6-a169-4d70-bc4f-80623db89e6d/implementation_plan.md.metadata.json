@@ -1,6 +1,6 @@
 {
-  "summary": "Plan de arhitectură pentru ecranul de start Splash Screen, autentificare dedicată pentru Creator/Commissioner, reguli avansate de distribuire a lotului inițial (fără duplicate și cu respectarea limitei pe club), sistem ierarhic de membership (Gratuit, Pro, Admin, Creator) cu restricții specifice de imagini și date live, și gestiunea completă a cluburilor din Superliga (editare, adăugare club nou, embleme și dezactivare cu ascunderea jucătorilor).",
-  "updatedAt": "2026-10-17T12:55:47.593250629Z",
-  "requestFeedback": true,
-  "userFacing": true
+  "summary":  "Plan de implementare pentru:\n1. Curățarea datelor hardcodate (resetare puncte etapă la 0, scoruri meciuri 0-0, eliminare evenimente mock) pentru testare pe date reale.\n2. Fereastră modală de confirmare la finalul Meciului Demo (Salvează în Firestore vs. Anulează / Resetare Test).\n3. Eliminarea fluxului global de evenimente stil livescore din antetul meciului demo și direcționarea evenimentelor exclusiv către fotbaliștii titulari ai echipei, accesibile prin click pe fiecare fotbalist în parte.",
+  "updatedAt":  "2026-10-30T15:09:59.892003242Z",
+  "requestFeedback":  true,
+  "userFacing":  true
 }

@@ -1,12 +1,14 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, getDoc, setDoc, doc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, getDoc, setDoc, doc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { getAuth, sendPasswordResetEmail } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Player, Club, UserMembership } from '../types/football';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = (firebaseConfig as any).firestoreDatabaseId
+  ? getFirestore(app, (firebaseConfig as any).firestoreDatabaseId)
+  : getFirestore(app);
 export const auth = getAuth(app);
 
 export enum OperationType {
@@ -535,9 +537,10 @@ export async function deleteFirestoreLeague(leagueId: string, code: string): Pro
 
 // Global player editing & persistence across Firestore and LocalStorage
 export async function saveGlobalPlayerEdit(player: Player): Promise<boolean> {
-  // Store the 6 core general data attributes + pointsTotal in the global database
+  // Store the core general data attributes + pointsTotal in the global database
   const payload: Partial<Player> & { id: string; updatedAt: string } = {
     id: player.id,
+    sportmonksId: player.sportmonksId,
     name: player.name, // 1. Nume Complet
     clubId: player.clubId, // 2. Club
     position: player.position, // 3. Poziție
@@ -805,6 +808,159 @@ export async function toggleFirestoreClubStatus(clubId: string, isActive: boolea
     return false;
   }
 }
+
+/**
+ * Salvează maparea de ID-uri Sportmonks în Firestore (/all_players/{playerId}) și LocalStorage
+ */
+export async function saveSportmonksPlayerMappings(
+  mappings: Array<{ playerId: string; sportmonksId: number }>
+): Promise<number> {
+  let count = 0;
+  const overrides = JSON.parse(localStorage.getItem('supermanager_player_overrides') || '{}');
+
+  for (const m of mappings) {
+    try {
+      const docRef = doc(db, 'all_players', m.playerId);
+      await setDoc(docRef, { sportmonksId: m.sportmonksId, updatedAt: new Date().toISOString() }, { merge: true });
+      count++;
+    } catch (err) {
+      console.warn(`Nu s-a putut salva sportmonksId pentru ${m.playerId} în Firestore:`, err);
+    }
+    // Salvăm și în local storage overrides
+    overrides[m.playerId] = {
+      ...(overrides[m.playerId] || {}),
+      sportmonksId: m.sportmonksId,
+    };
+  }
+
+  localStorage.setItem('supermanager_player_overrides', JSON.stringify(overrides));
+  return count;
+}
+
+export interface LiveMatchSnapshotPayload {
+  matches: any[];
+  scores: Record<string, number>; // sportmonksId -> points
+  playerDetails: Record<string, any>; // sportmonksId -> details
+  updatedAt: string;
+  source: string;
+  status: 'INPLAY' | 'FT' | 'STANDBY';
+}
+
+/**
+ * Salvează snapshot-ul centralizat în Firestore (/live_matches/current)
+ * Permite unui singur canal (Admin / Coordinator) să distribuie datele către toți utilizatorii.
+ */
+export async function saveLiveMatchesSnapshot(payload: LiveMatchSnapshotPayload): Promise<boolean> {
+  try {
+    const docRef = doc(db, 'live_matches', 'current');
+    await setDoc(docRef, payload, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'live_matches/current');
+  }
+
+  // Backup LocalStorage pentru acces instantaneu offline
+  try {
+    localStorage.setItem('supermanager_live_matches_snapshot', JSON.stringify(payload));
+  } catch (e) {
+    /* ignore */
+  }
+
+  return true;
+}
+
+/**
+ * Ascultă în timp real documentul /live_matches/current prin Firestore onSnapshot
+ * Elimină riscul de rate limit (429) per telefon client.
+ */
+export function subscribeToLiveMatches(
+  onUpdate: (payload: LiveMatchSnapshotPayload | null) => void
+): () => void {
+  try {
+    const docRef = doc(db, 'live_matches', 'current');
+    const unsubscribe = onSnapshot(
+      docRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data() as LiveMatchSnapshotPayload;
+          onUpdate(data);
+          try {
+            localStorage.setItem('supermanager_live_matches_snapshot', JSON.stringify(data));
+          } catch (e) {
+            /* ignore */
+          }
+        }
+      },
+      (err) => {
+        console.warn('onSnapshot live_matches note:', err);
+      }
+    );
+    return unsubscribe;
+  } catch (err) {
+    console.warn('Eroare abonare onSnapshot live_matches:', err);
+    return () => {};
+  }
+}
+
+/**
+ * Salvează permanent punctajele finale ale etapei (/gameweek_scores/{gwId})
+ * Garantează că la finalul meciului (FT), punctele fotbaliștilor NU se resetează la zero!
+ */
+export async function saveGameweekFinalScores(
+  gwId: string,
+  scores: Record<string, number>,
+  matches: any[]
+): Promise<boolean> {
+  const payload = {
+    gwId,
+    scores,
+    matches,
+    savedAt: new Date().toISOString(),
+    isFinalized: true,
+  };
+
+  try {
+    const docRef = doc(db, 'gameweek_scores', gwId);
+    await setDoc(docRef, payload, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `gameweek_scores/${gwId}`);
+  }
+
+  try {
+    localStorage.setItem(`supermanager_gw_scores_${gwId}`, JSON.stringify(payload));
+  } catch (e) {
+    /* ignore */
+  }
+
+  return true;
+}
+
+/**
+ * Încarcă punctajele finale ale etapei dacă meciurile nu mai sunt inplay
+ */
+export async function loadGameweekFinalScores(
+  gwId: string = 'gw_current'
+): Promise<{ scores: Record<string, number>; matches: any[] } | null> {
+  try {
+    const docRef = doc(db, 'gameweek_scores', gwId);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data() as any;
+    }
+  } catch (err) {
+    /* fallback local */
+  }
+
+  try {
+    const local = localStorage.getItem(`supermanager_gw_scores_${gwId}`);
+    if (local) return JSON.parse(local);
+  } catch (e) {
+    /* ignore */
+  }
+
+  return null;
+}
+
+
 
 
 

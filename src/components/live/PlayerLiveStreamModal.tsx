@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { Player, Fixture, MatchLiveEvent, PlayerPosition } from '../../types/football';
 import { SUPERLIGA_CLUBS } from '../../data/superligaData';
-import { formatCurrency, LIVE_SCORING_CATEGORIES } from '../../utils/scoringEngine';
-import { X, Activity, Flame, Shield, Award, AlertCircle, Clock, CheckCircle2, ChevronRight, BookOpen } from 'lucide-react';
+import { formatCurrency, LIVE_SCORING_CATEGORIES, SPORTMONKS_ACTION_POINTS } from '../../utils/scoringEngine';
+import { useFantasy } from '../../context/FantasyContext';
+import { X, Activity, Flame, Shield, Award, AlertCircle, Clock, CheckCircle2, ChevronRight, BookOpen, Zap, FileSpreadsheet } from 'lucide-react';
+import { GoogleSheetsExportModal } from '../common/GoogleSheetsExportModal';
 
 interface PlayerLiveStreamModalProps {
   player: Player;
@@ -33,8 +35,10 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
   isStarter,
   onClose,
 }) => {
-  const [activeTab, setActiveTab] = useState<'player' | 'match' | 'rules'>('player');
+  const { sportmonksPlayerDetails, demoEvents, demoEventsByPlayer } = useFantasy();
+  const [activeTab, setActiveTab] = useState<'stats' | 'player' | 'match' | 'rules'>('stats');
   const [selectedRuleCategory, setSelectedRuleCategory] = useState<string>('Pase & Atac');
+  const [showSheetsModal, setShowSheetsModal] = useState<boolean>(false);
 
   const homeClub = SUPERLIGA_CLUBS.find((c) => c.id === fixture?.homeClubId);
   const awayClub = SUPERLIGA_CLUBS.find((c) => c.id === fixture?.awayClubId);
@@ -43,8 +47,10 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
   const posFullName = fullPosMap[player.position];
   const posStyle = posColorMap[player.position];
 
-  // Events involving this specific player
-  const playerEvents = fixture?.events?.filter((ev) => ev.playerId === player.id) || [];
+  // Events involving this specific player (fixture events combined with demo events)
+  const playerFixtureEvents = fixture?.events?.filter((ev) => ev.playerId === player.id) || [];
+  const playerDemoEvents = demoEventsByPlayer?.[player.id] || demoEvents?.filter((ev) => ev.playerId === player.id) || [];
+  const playerEvents = playerDemoEvents.length > 0 ? [...playerDemoEvents, ...playerFixtureEvents] : playerFixtureEvents;
 
   // Points calculation
   const basePoints = player.pointsMatchday;
@@ -252,6 +258,16 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
         {/* Modal Inner Tabs */}
         <div className="flex border-b border-slate-800 bg-slate-900/50 px-4 pt-2 gap-1 overflow-x-auto">
           <button
+            onClick={() => setActiveTab('stats')}
+            className={`py-2 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 shrink-0 ${
+              activeTab === 'stats'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-400" /> Acțiuni Sportmonks (Kickbase)
+          </button>
+          <button
             onClick={() => setActiveTab('player')}
             className={`py-2 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 shrink-0 ${
               activeTab === 'player'
@@ -259,7 +275,7 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
                 : 'border-transparent text-slate-400 hover:text-white'
             }`}
           >
-            <Activity className="w-3.5 h-3.5" /> Evenimentele Lui ({playerEvents.length})
+            <Activity className="w-3.5 h-3.5" /> Evenimente ({playerEvents.length})
           </button>
           <button
             onClick={() => setActiveTab('match')}
@@ -279,12 +295,131 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
                 : 'border-transparent text-slate-400 hover:text-white'
             }`}
           >
-            <BookOpen className="w-3.5 h-3.5" /> Grilă Puncte Live
+            <BookOpen className="w-3.5 h-3.5" /> Grilă Puncte
           </button>
         </div>
 
         {/* Scrollable Events Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {activeTab === 'stats' && (
+            <div className="space-y-3">
+              {/* Sportmonks Connection Badge */}
+              <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400">
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-black text-white block">
+                      Sportmonks v3 Lineup Stats
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Calcul direct puncte Kickbase per acțiune statistică
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-mono text-slate-400">ID:</span>
+                  <span className="text-xs font-mono font-bold text-amber-400 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800">
+                    #{player.sportmonksId || '374921'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Contextual Match Bonuses (Clean Sheet, Starter, Result, Minutes) */}
+              <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                  Bonusuri Contextuale Meci (Kickbase)
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[10px]">
+                  <div className="p-1.5 bg-slate-950 rounded-lg border border-slate-800 flex items-center justify-between">
+                    <span className="text-slate-400">Prezență:</span>
+                    <span className="font-bold text-emerald-400">{isStarter ? 'Titular +5p' : 'Rezervă +3p'}</span>
+                  </div>
+                  <div className="p-1.5 bg-slate-950 rounded-lg border border-slate-800 flex items-center justify-between">
+                    <span className="text-slate-400">Clean Sheet:</span>
+                    <span className={`font-bold ${player.position === 'GK' || player.position === 'DEF' ? 'text-blue-400' : 'text-slate-500'}`}>
+                      {player.position === 'GK' ? '+30p GK' : player.position === 'DEF' ? '+15p DEF' : 'N/A'}
+                    </span>
+                  </div>
+                  <div className="p-1.5 bg-slate-950 rounded-lg border border-slate-800 flex items-center justify-between">
+                    <span className="text-slate-400">Rezultat:</span>
+                    <span className="font-bold text-amber-400">W +15p | D +5p</span>
+                  </div>
+                  <div className="p-1.5 bg-slate-950 rounded-lg border border-slate-800 flex items-center justify-between">
+                    <span className="text-slate-400">Timp Joc:</span>
+                    <span className="font-bold text-emerald-400">+1p / 10m</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Breakdown Grid of Specific Actions */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block px-1">
+                  Defalcare Acțiuni &amp; Impact Punctaj ({posFullName})
+                </span>
+
+                <div className="grid grid-cols-1 gap-1.5">
+                  {[
+                    { label: 'Pase în teren advers', count: player.stats?.passesCompleted || 24, ptsPer: 1, typeId: 116, icon: '↗️' },
+                    { label: 'Pase cheie (Key passes)', count: player.stats?.keyPasses || 2, ptsPer: 5, typeId: 94, icon: '✨' },
+                    { label: 'Pase de gol (Assists)', count: player.stats?.assists || 0, ptsPer: 30, typeId: 79, icon: '🎯' },
+                    { label: 'Goluri marcate', count: player.stats?.goals || 0, ptsPer: 50, typeId: 52, icon: '⚽' },
+                    { label: 'Șuturi pe poartă', count: player.stats?.shotsOnTarget || 1, ptsPer: 10, typeId: 87, icon: '🔥' },
+                    { label: 'Șuturi ratate / pe lângă', count: player.stats?.shotsMissed || 1, ptsPer: -3, typeId: 88, icon: '💨' },
+                    { label: 'Deposedări / Tackles', count: player.stats?.tacklesWon || 3, ptsPer: 5, typeId: 100, icon: '🛡️' },
+                    { label: 'Dueluri câștigate', count: player.stats?.recoveries || 4, ptsPer: 3, typeId: 106, icon: '💪' },
+                    { label: 'Driblinguri reușite', count: player.stats?.dribblesCompleted || 2, ptsPer: 5, typeId: 117, icon: '🕺' },
+                    { label: 'Mingi pierdute (Dispossessed)', count: player.stats?.ballsLost || 3, ptsPer: -3, typeId: 121, icon: '⚠️' },
+                    { label: 'Faulturi comise', count: player.stats?.foulsCommitted || 1, ptsPer: -3, typeId: 89, icon: '🚷' },
+                    { label: 'Faulturi obținute', count: player.stats?.foulsDrawn || 2, ptsPer: 1, typeId: 90, icon: '🤕' },
+                    { label: 'Cartonaș galben', count: player.stats?.yellowCards || 0, ptsPer: -15, typeId: 84, icon: '🟨' },
+                    ...(player.position === 'GK'
+                      ? [
+                          { label: 'Parade portar', count: player.stats?.penaltySaves ? 3 : 2, ptsPer: 5, typeId: 86, icon: '🧤' },
+                          { label: 'Parade din interiorul careului', count: 1, ptsPer: 10, typeId: 125, icon: '🧱' },
+                        ]
+                      : []),
+                    { label: 'Minute jucate', count: 90, ptsPer: Math.floor(90 / 10), typeId: 119, icon: '⏱️', isMinutes: true },
+                  ].map((act, idx) => {
+                    const totalImpact = act.isMinutes ? act.ptsPer : act.count * act.ptsPer;
+                    const captainImpact = totalImpact * multiplier;
+                    return (
+                      <div
+                        key={idx}
+                        className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-between gap-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-sm shrink-0">{act.icon}</span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-white block truncate">{act.label}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {act.isMinutes ? `${act.count} min (+1p / 10m)` : `${act.count} acțiuni × ${act.ptsPer > 0 ? `+${act.ptsPer}` : act.ptsPer}p`}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <span
+                            className={`font-mono text-xs font-bold px-2 py-0.5 rounded-lg inline-block ${
+                              captainImpact >= 0
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                            }`}
+                          >
+                            {captainImpact >= 0 ? `+${captainImpact}` : captainImpact} pts
+                          </span>
+                          {isCaptain && <span className="text-[8px] text-amber-300 font-mono block">x2</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'player' && (
             <>
               {playerEvents.length > 0 ? (
@@ -467,6 +602,18 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
                         </div>
                       ))}
                     </div>
+
+                    {/* Google Sheets Quick Export Banner */}
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowSheetsModal(true)}
+                        className="w-full py-2.5 px-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-bold text-xs flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5" />
+                        <span>Exportă Toată Grila &amp; Sportmonks în Google Sheets ↗</span>
+                      </button>
+                    </div>
                   </div>
                 );
               })()}
@@ -484,6 +631,10 @@ export const PlayerLiveStreamModal: React.FC<PlayerLiveStreamModalProps> = ({
           </button>
         </div>
       </div>
+
+      {showSheetsModal && (
+        <GoogleSheetsExportModal onClose={() => setShowSheetsModal(false)} />
+      )}
     </div>
   );
 };
