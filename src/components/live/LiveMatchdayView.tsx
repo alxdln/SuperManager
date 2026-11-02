@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useFantasy } from '../../context/FantasyContext';
 import { SUPERLIGA_CLUBS, SUPERLIGA_STANDINGS } from '../../data/superligaData';
 import { Player, PlayerPosition, Fixture } from '../../types/football';
 import { PlayerLiveStreamModal } from './PlayerLiveStreamModal';
 import { DemoMatchSaveModal } from './DemoMatchSaveModal';
+import { AnimatedScoreBadge, getPointsTierColor } from '../common/AnimatedScoreBadge';
 import {
   Play,
   Pause,
@@ -23,9 +24,11 @@ import {
   AlertTriangle,
   Lock,
   Trash2,
+  Database,
 } from 'lucide-react';
 import { formatCurrency, formatFullCurrency } from '../../utils/scoringEngine';
 import { getPlayerDisplayAvatar } from '../../utils/playerAvatar';
+import { SportmonksLiveService } from '../../services/liveFootballApis';
 
 const fullPosMap: Record<PlayerPosition, string> = {
   GK: 'PORTAR',
@@ -77,7 +80,45 @@ export const LiveMatchdayView: React.FC = () => {
     sportmonksActiveMatches,
     isSportmonksPolling,
     refreshSportmonksLiveScores,
+    testFixturesEnabled,
+    toggleTestFixtures,
+    applyCraiovaBotosaniSquad,
+    finalizeMatchNow,
+    finalizedMatchIds,
   } = useFantasy();
+
+  useEffect(() => {
+    refreshSportmonksLiveScores();
+  }, [refreshSportmonksLiveScores]);
+
+  const nextMatch = useMemo(() => {
+    return SportmonksLiveService.getNextUpcomingSuperligaMatch();
+  }, []);
+
+  const [countdown, setCountdown] = useState<{ hours: string; minutes: string; seconds: string }>({
+    hours: '18',
+    minutes: '30',
+    seconds: '00',
+  });
+
+  useEffect(() => {
+    const update = () => {
+      const diff = Math.max(0, nextMatch.kickoffTimestamp - Date.now());
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+      setCountdown({
+        hours: String(hours).padStart(2, '0'),
+        minutes: String(minutes).padStart(2, '0'),
+        seconds: String(seconds).padStart(2, '0'),
+      });
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [nextMatch]);
+
+  const [isSavingMatch, setIsSavingMatch] = useState<boolean>(false);
 
   // Primary tab is "myPlayers" as requested by user
   const [activeTab, setActiveTab] = useState<'myPlayers' | 'fixtures' | 'table' | 'topPerformers'>('myPlayers');
@@ -115,8 +156,54 @@ export const LiveMatchdayView: React.FC = () => {
     return fixtures.find((f) => f.homeClubId === clubId || f.awayClubId === clubId);
   };
 
+  // Calculare punctaj curent pentru un jucător (Sportmonks live sau meci curent + multiplicator căpitan)
+  const getPlayerMatchdayPoints = (p: Player): number => {
+    const isCaptain = squad.captainPlayerId === p.id;
+    const smId = p.sportmonksId ? Number(p.sportmonksId) : undefined;
+    const liveSmScore = smId ? sportmonksScores.get(smId) : undefined;
+    const currentBasePts = typeof liveSmScore === 'number' ? liveSmScore : p.pointsMatchday;
+    return currentBasePts * (isCaptain ? 2 : 1);
+  };
+
+  // Sortare Titulari descrescător după puncte (cei cu cele mai multe puncte afișați primii)
+  const sortedStarterPlayers = useMemo(() => {
+    return [...starterPlayers].sort((a, b) => {
+      const ptsA = getPlayerMatchdayPoints(a);
+      const ptsB = getPlayerMatchdayPoints(b);
+      if (ptsB !== ptsA) return ptsB - ptsA;
+      return a.name.localeCompare(b.name);
+    });
+  }, [starterPlayers, sportmonksScores, squad.captainPlayerId]);
+
+  // Sortare Rezerve descrescător după puncte (cei cu cele mai multe puncte afișați primii)
+  const sortedBenchPlayers = useMemo(() => {
+    return [...benchPlayers].sort((a, b) => {
+      const ptsA = getPlayerMatchdayPoints(a);
+      const ptsB = getPlayerMatchdayPoints(b);
+      if (ptsB !== ptsA) return ptsB - ptsA;
+      return a.name.localeCompare(b.name);
+    });
+  }, [benchPlayers, sportmonksScores, squad.captainPlayerId]);
+
+  // Mod de afișare pentru secțiunea Jucătorii Mei: 'sections' (Titulari / Rezerve) sau 'ranking' (Top 1-15 combinat)
+  const [squadViewMode, setSquadViewMode] = useState<'sections' | 'allRanked'>('sections');
+
+  // Toți cei 15 jucători din lot sortați descrescător după punctaj
+  const sortedAllSquadPlayers = useMemo(() => {
+    const all = [
+      ...starterPlayers.map((p) => ({ player: p, isStarter: true })),
+      ...benchPlayers.map((p) => ({ player: p, isStarter: false })),
+    ];
+    return all.sort((a, b) => {
+      const ptsA = getPlayerMatchdayPoints(a.player);
+      const ptsB = getPlayerMatchdayPoints(b.player);
+      if (ptsB !== ptsA) return ptsB - ptsA;
+      return a.player.name.localeCompare(b.player.name);
+    });
+  }, [starterPlayers, benchPlayers, sportmonksScores, squad.captainPlayerId]);
+
   // Render a player card inside the "Jucătorii Tăi" section
-  const renderPlayerRow = (player: Player, isStarter: boolean) => {
+  const renderPlayerRow = (player: Player, isStarter: boolean, rankIndex?: number) => {
     const isCaptain = squad.captainPlayerId === player.id;
     const playerClub = SUPERLIGA_CLUBS.find((c) => c.id === player.clubId);
     const fixture = getPlayerFixture(player.clubId);
@@ -128,21 +215,19 @@ export const LiveMatchdayView: React.FC = () => {
     const oppClubId = isHome ? fixture?.awayClubId : fixture?.homeClubId;
     const oppClub = SUPERLIGA_CLUBS.find((c) => c.id === oppClubId);
 
-    const ptsEarned = player.pointsMatchday * (isCaptain ? 2 : 1);
-    const isFreeTier = user.membership === 'gratuit';
+    const smId = player.sportmonksId ? Number(player.sportmonksId) : undefined;
+    const liveSmScore = smId ? sportmonksScores.get(smId) : undefined;
+    const currentBasePts = typeof liveSmScore === 'number' ? liveSmScore : player.pointsMatchday;
+    const ptsEarned = currentBasePts * (isCaptain ? 2 : 1);
     const isFinished = fixture?.isFinished;
-    const hidePlayerLivePoints = isFreeTier && !isFinished;
+    const hidePlayerLivePoints = false; // Permite vizualizarea live a punctelor și accesul la fluxul de acțiuni
 
     return (
       <div
         key={player.id}
         onClick={() => {
-          if (hidePlayerLivePoints) {
-            setShowProUpgradeModal(true);
-            return;
-          }
           setSelectedPlayerForLive({
-            player,
+            player: { ...player, pointsMatchday: currentBasePts },
             fixture,
             isCaptain,
             isStarter,
@@ -156,7 +241,22 @@ export const LiveMatchdayView: React.FC = () => {
             : 'bg-slate-900/60 border-slate-800/70 hover:border-slate-700'
         }`}
       >
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          {typeof rankIndex === 'number' && (
+            <span
+              className={`w-6 h-6 rounded-lg flex items-center justify-center font-mono font-black text-[11px] shrink-0 ${
+                rankIndex === 0
+                  ? 'bg-amber-400 text-slate-950 shadow-sm shadow-amber-400/30'
+                  : rankIndex === 1
+                  ? 'bg-slate-300 text-slate-950'
+                  : rankIndex === 2
+                  ? 'bg-amber-700 text-amber-100'
+                  : 'bg-slate-800 text-slate-400 border border-slate-700/60'
+              }`}
+            >
+              #{rankIndex + 1}
+            </span>
+          )}
           <div className="relative shrink-0">
             <img
               src={getPlayerDisplayAvatar(player, user.membership)}
@@ -226,21 +326,8 @@ export const LiveMatchdayView: React.FC = () => {
               </span>
             </div>
           ) : (
-            <div className="text-right">
-              <div className="flex items-baseline justify-end gap-1">
-                <span
-                  className={`font-mono text-sm font-black ${
-                    ptsEarned > 0
-                      ? 'text-emerald-400'
-                      : ptsEarned < 0
-                      ? 'text-rose-400'
-                      : 'text-amber-400'
-                  }`}
-                >
-                  {ptsEarned >= 0 ? `+${ptsEarned}` : ptsEarned}
-                </span>
-                <span className="text-[10px] text-slate-400 font-bold">pts</span>
-              </div>
+            <div className="text-right flex flex-col items-end justify-center">
+              <AnimatedScoreBadge score={ptsEarned} prefixPlus={true} suffix="pts" size="md" />
               <span className="text-[9px] text-emerald-400/90 font-medium block flex items-center gap-0.5 justify-end mt-0.5">
                 <span>Flux Live</span>
                 <ChevronRight className="w-3 h-3 text-emerald-400" />
@@ -276,255 +363,222 @@ export const LiveMatchdayView: React.FC = () => {
         </div>
       )}
 
-      {/* Real Sportmonks Inplay Matches (Live API Feed) */}
-      {sportmonksActiveMatches && sportmonksActiveMatches.length > 0 && (
-        <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-950/50 via-slate-900 to-slate-950 border border-amber-500/60 shadow-xl space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
-              <h3 className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-                <span>Meciuri Live Sportmonks (Inplay SuperLiga)</span>
-                <span className="bg-rose-600 text-white text-[8px] font-black px-1.5 py-0.2 rounded-full">
-                  LIVE API
-                </span>
-              </h3>
-            </div>
-            <button
-              onClick={refreshSportmonksLiveScores}
-              className="text-[10px] text-amber-300 hover:text-white font-mono bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700 flex items-center gap-1"
-            >
-              <span>Reîmprospătează (30s auto)</span>
-            </button>
-          </div>
-
-          {sportmonksActiveMatches.map((match: any, idx: number) => {
-            const homePart = match.participants?.[0] || { name: 'Gazde' };
-            const awayPart = match.participants?.[1] || { name: 'Oaspeți' };
-            const homeScore = match.scores?.find((s: any) => s.description === 'CURRENT' && s.score?.participant === 'home')?.score?.goals ?? 0;
-            const awayScore = match.scores?.find((s: any) => s.description === 'CURRENT' && s.score?.participant === 'away')?.score?.goals ?? 0;
-            const liveEvents = match.events || [];
-
-            return (
-              <div key={match.id || idx} className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2.5">
-                <div className="flex items-center justify-between text-center gap-2">
-                  <div className="flex-1 text-left min-w-0">
-                    <span className="text-xs font-black text-white truncate block">{homePart.name}</span>
-                    <span className="text-[10px] text-slate-400">Gazde</span>
-                  </div>
-                  <div className="px-3 shrink-0">
-                    <span className="font-mono text-xl font-black text-emerald-400">
-                      {homeScore} - {awayScore}
-                    </span>
-                    <span className="block text-[9px] font-bold text-amber-400 animate-pulse">
-                      {match.minute ? `${match.minute}' LIVE` : 'INPLAY'}
-                    </span>
-                  </div>
-                  <div className="flex-1 text-right min-w-0">
-                    <span className="text-xs font-black text-white truncate block">{awayPart.name}</span>
-                    <span className="text-[10px] text-slate-400">Oaspeți</span>
-                  </div>
-                </div>
-
-                {liveEvents.length > 0 && (
-                  <div className="space-y-1 max-h-36 overflow-y-auto pt-2 border-t border-slate-800/80">
-                    <span className="text-[9px] font-bold uppercase text-slate-400 block">
-                      Evenimente Extrase în Direct (events.type):
-                    </span>
-                    {liveEvents.slice(0, 6).map((ev: any, eIdx: number) => (
-                      <div key={ev.id || eIdx} className="text-[10px] text-slate-300 flex items-center justify-between">
-                        <span>
-                          {ev.minute}&apos; <b className="text-amber-300">{ev.type?.name || 'Eveniment'}</b> - {ev.player_name || ev.player?.display_name || 'Jucător'}
-                        </span>
-                        <span className="text-emerald-400 font-mono font-bold text-[9px] bg-slate-900 px-1 py-0.2 rounded">
-                          {ev.type?.code || 'STAT'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+      {/* Meciuri Live Sportmonks vs Ecran de Așteptare Standby */}
+      {sportmonksActiveMatches && sportmonksActiveMatches.length > 0 ? (
+        <div className="space-y-3">
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-950/40 via-slate-900 to-slate-950 border border-amber-500/50 shadow-xl space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+                <h3 className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                  <span>Meciuri Live SuperLiga (Sportmonks v3)</span>
+                  <span className="bg-rose-600 text-white text-[8px] font-black px-1.5 py-0.2 rounded-full">
+                    INPLAY
+                  </span>
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={refreshSportmonksLiveScores}
+                  className="text-[10px] text-amber-300 hover:text-white font-mono bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700 flex items-center gap-1 active:scale-95 transition-all"
+                  title="Reîmprospătează datele live"
+                >
+                  <RotateCcw className={`w-3 h-3 ${isSportmonksPolling ? 'animate-spin text-emerald-400' : ''}`} />
+                  <span>Sincronizează</span>
+                </button>
+                {testFixturesEnabled && (
+                  <button
+                    onClick={toggleTestFixtures}
+                    className="text-[10px] text-slate-400 hover:text-slate-200 bg-slate-900 px-2 py-0.5 rounded-md border border-slate-800"
+                  >
+                    Închide Test
+                  </button>
                 )}
               </div>
-            );
-          })}
+            </div>
+
+            {sportmonksActiveMatches.map((match: any, idx: number) => {
+              const homePart = match.participants?.[0] || { name: 'Gazde' };
+              const awayPart = match.participants?.[1] || { name: 'Oaspeți' };
+              const homeScore =
+                match.scores?.find((s: any) => s.description === 'CURRENT' && s.score?.participant === 'home')?.score?.goals ?? 0;
+              const awayScore =
+                match.scores?.find((s: any) => s.description === 'CURRENT' && s.score?.participant === 'away')?.score?.goals ?? 0;
+              const liveEvents = match.events || [];
+
+              return (
+                <div key={match.id || idx} className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2.5">
+                  <div className="flex items-center justify-between text-center gap-2">
+                    <div className="flex-1 text-left min-w-0">
+                      <span className="text-xs font-black text-white truncate block">{homePart.name}</span>
+                      <span className="text-[10px] text-slate-400">Gazde</span>
+                    </div>
+                    <div className="px-3 shrink-0">
+                      <span className="font-mono text-xl font-black text-emerald-400">
+                        {homeScore} - {awayScore}
+                      </span>
+                      <span className="block text-[9px] font-bold text-amber-400 animate-pulse">
+                        {match.minute ? `${match.minute}' LIVE` : 'INPLAY'}
+                      </span>
+                    </div>
+                    <div className="flex-1 text-right min-w-0">
+                      <span className="text-xs font-black text-white truncate block">{awayPart.name}</span>
+                      <span className="text-[10px] text-slate-400">Oaspeți</span>
+                    </div>
+                  </div>
+
+                  {liveEvents.length > 0 && (
+                    <div className="space-y-1 max-h-36 overflow-y-auto pt-2 border-t border-slate-800/80">
+                      <span className="text-[9px] font-bold uppercase text-slate-400 block">
+                        Evenimente Extrase în Direct:
+                      </span>
+                      {liveEvents.slice(0, 6).map((ev: any, eIdx: number) => (
+                        <div key={ev.id || eIdx} className="text-[10px] text-slate-300 flex items-center justify-between">
+                          <span>
+                            {ev.minute}&apos; <b className="text-amber-300">{ev.type?.name || 'Eveniment'}</b> - {ev.player_name || ev.player?.display_name || 'Jucător'}
+                          </span>
+                          <span className="text-emerald-400 font-mono font-bold text-[9px] bg-slate-900 px-1 py-0.2 rounded">
+                            {ev.type?.code || 'STAT'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Quick Action Bar for Live Matches */}
+          <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-3 shadow-md flex-wrap">
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4 text-emerald-400 animate-pulse" />
+              <span className="text-xs font-bold text-slate-200">
+                Punctajele fotbaliștilor se actualizează automat la fiecare 30 de secunde.
+              </span>
+            </div>
+
+            <button
+              onClick={async () => {
+                setIsSavingMatch(true);
+                try {
+                  await finalizeMatchNow('19729653');
+                  await finalizeMatchNow('19729652');
+                } finally {
+                  setIsSavingMatch(false);
+                }
+              }}
+              disabled={isSavingMatch}
+              className={`py-1.5 px-3 rounded-xl font-bold text-xs inline-flex items-center gap-1.5 active:scale-95 transition-all ${
+                finalizedMatchIds.includes('19729653') || finalizedMatchIds.includes('fix_19729653')
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black shadow-md shadow-emerald-500/20'
+              }`}
+            >
+              <Database className={`w-3.5 h-3.5 ${isSavingMatch ? 'animate-spin' : ''}`} />
+              <span>
+                {isSavingMatch
+                  ? 'Se salvează...'
+                  : finalizedMatchIds.includes('19729653') || finalizedMatchIds.includes('fix_19729653')
+                  ? 'Salvat în Firestore'
+                  : 'Salvează în Baza de Date'}
+              </span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* Standby View: Ecran de Așteptare Următorul Meci Programat (curat, fără telemetrie) */
+        <div className="p-5 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900/95 to-slate-950 border border-slate-800 shadow-xl space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 font-black text-xs uppercase tracking-wider border border-emerald-500/20">
+                SuperLiga României · Etapa {nextMatch.round}
+              </span>
+            </div>
+            <span className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-slate-400" />
+              <span>Următorul Meci Programat</span>
+            </span>
+          </div>
+
+          {/* Card Central Următorul Meci cu Countdown */}
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6 py-2">
+            {/* Echipele */}
+            <div className="flex items-center justify-center gap-6 w-full md:w-auto text-center">
+              <div className="flex flex-col items-center gap-1.5">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-red-600 flex items-center justify-center text-white font-black text-sm shadow-md border border-white/10">
+                  FCSB
+                </div>
+                <span className="text-xs font-black text-white">{nextMatch.homeClubName}</span>
+                <span className="text-[10px] text-slate-400">Gazde</span>
+              </div>
+
+              <div className="flex flex-col items-center px-3">
+                <span className="text-xs font-black text-slate-500 uppercase tracking-widest">VS</span>
+                <span className="text-[11px] font-mono text-emerald-400 font-bold mt-1">
+                  {nextMatch.scheduledTime}
+                </span>
+                <span className="text-[10px] text-slate-400 mt-0.5 truncate max-w-[160px]">
+                  {nextMatch.stadium}
+                </span>
+              </div>
+
+              <div className="flex flex-col items-center gap-1.5">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-700 to-red-900 flex items-center justify-center text-white font-black text-sm shadow-md border border-white/10">
+                  RAP
+                </div>
+                <span className="text-xs font-black text-white">{nextMatch.awayClubName}</span>
+                <span className="text-[10px] text-slate-400">Oaspeți</span>
+              </div>
+            </div>
+
+            {/* Countdown Timer */}
+            <div className="flex flex-col items-center md:items-end">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1.5">
+                Timp până la start
+              </span>
+              <div className="flex items-center gap-1.5 font-mono">
+                <div className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-center min-w-[44px]">
+                  <span className="text-base font-black text-white">{countdown.hours}</span>
+                  <span className="text-[8px] uppercase tracking-wider text-slate-400 block">Ore</span>
+                </div>
+                <span className="text-slate-600 font-bold">:</span>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-center min-w-[44px]">
+                  <span className="text-base font-black text-white">{countdown.minutes}</span>
+                  <span className="text-[8px] uppercase tracking-wider text-slate-400 block">Min</span>
+                </div>
+                <span className="text-slate-600 font-bold">:</span>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-center min-w-[44px]">
+                  <span className="text-base font-black text-emerald-400">{countdown.seconds}</span>
+                  <span className="text-[8px] uppercase tracking-wider text-slate-400 block">Sec</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Bară de Acțiuni Discrete */}
+          <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+            <button
+              onClick={() => refreshSportmonksLiveScores()}
+              className="py-1.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 inline-flex items-center gap-1.5 active:scale-95 transition-all"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${isSportmonksPolling ? 'animate-spin text-emerald-400' : 'text-slate-400'}`} />
+              <span>Verifică Meciuri Live</span>
+            </button>
+
+            <button
+              onClick={toggleTestFixtures}
+              className={`py-1.5 px-3 rounded-xl text-xs font-bold transition-all border inline-flex items-center gap-1.5 active:scale-95 ${
+                testFixturesEnabled
+                  ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                  : 'bg-slate-800/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-700'
+              }`}
+            >
+              <span>{testFixturesEnabled ? 'Meciuri Test Active (Craiova vs Botoșani)' : 'Previzualizează Meci Test Craiova'}</span>
+            </button>
+          </div>
         </div>
       )}
-
-      {/* 1-Minute Demo Match Arena Card */}
-      <div className={`p-4 rounded-2xl border transition-all ${
-        isDemoMatchActive
-          ? 'bg-gradient-to-br from-indigo-950/60 via-slate-900 to-emerald-950/40 border-emerald-500/50 shadow-lg shadow-emerald-500/10'
-          : 'bg-slate-900/90 border-slate-800'
-      }`}>
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2.5">
-            <div className={`p-2 rounded-xl ${isDemoMatchActive ? 'bg-emerald-500/20 text-emerald-400 animate-pulse' : 'bg-indigo-500/20 text-indigo-400'}`}>
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-black uppercase tracking-wider text-white">
-                  Meci Demonstrativ (1 Minut)
-                </span>
-                {isDemoMatchActive ? (
-                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-rose-600 text-white animate-pulse">
-                    LIVE ACUM
-                  </span>
-                ) : (
-                  <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-slate-800 text-slate-400">
-                    Pregătit
-                  </span>
-                )}
-              </div>
-              <span className="text-[11px] text-slate-400 block mt-0.5">
-                Simulare accelerată 1 minut (60s = 90 min de joc) cu titularii tăi
-              </span>
-            </div>
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={resetMatchdayDataToZero}
-              className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-rose-950/40 hover:text-rose-300 hover:border-rose-800/60 text-slate-400 font-bold text-xs border border-slate-700/80 inline-flex items-center gap-1.5 active:scale-95 transition-all"
-              title="Resetează scorurile la 0-0 și punctele fotbaliștilor la 0 pentru a testa pe curat"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Reset Date (0-0)</span>
-            </button>
-
-            {isDemoMatchActive ? (
-              <>
-                <button
-                  onClick={resetDemoMatch}
-                  className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 inline-flex items-center gap-1.5 active:scale-95 transition-all"
-                  title="Oprește meciul demo"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Resetează</span>
-                </button>
-                <button
-                  onClick={startDemoMatch}
-                  className="py-2 px-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black uppercase tracking-wider text-xs shadow-md shadow-emerald-500/20 inline-flex items-center gap-1.5 active:scale-95 transition-all"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Restart Meci</span>
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={startDemoMatch}
-                className="py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black uppercase tracking-wider text-xs shadow-lg shadow-emerald-500/25 inline-flex items-center gap-2 active:scale-95 transition-all"
-              >
-                <Play className="w-4 h-4 fill-current" />
-                <span>Meci Demo (1 min)</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Active Demo Match Scoreboard and Timer */}
-        {isDemoMatchActive && (
-          <div className="mt-3.5 pt-3.5 border-t border-slate-800/80 space-y-3">
-            {/* Scoreboard */}
-            <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between gap-3 text-center flex-wrap">
-              <div className="flex-1 min-w-[100px]">
-                <span className="text-xs font-black uppercase text-emerald-400 block truncate">
-                  {user.teamName}
-                </span>
-                <span className="text-[10px] text-slate-400">Echipa Ta</span>
-              </div>
-
-              <div className="flex items-center gap-3 shrink-0">
-                <span className="font-mono text-2xl font-black text-white">
-                  {demoHomeScore} - {demoAwayScore}
-                </span>
-              </div>
-
-              <div className="flex-1 min-w-[100px]">
-                <span className="text-xs font-black uppercase text-slate-300 block truncate">
-                  Oponenți Superliga
-                </span>
-                <span className="text-[10px] text-slate-400">Rivali Etapă</span>
-              </div>
-            </div>
-
-            {/* Timers Strip */}
-            <div className="grid grid-cols-2 gap-2 text-center text-xs">
-              <div className="p-2 rounded-xl bg-slate-800/50 border border-slate-700/60 flex items-center justify-center gap-2">
-                <Timer className="w-4 h-4 text-emerald-400 animate-spin" />
-                <span className="text-slate-300">Timp Rămas:</span>
-                <b className="font-mono text-emerald-400">
-                  {Math.floor(demoTimeRemaining / 60).toString().padStart(2, '0')}:
-                  {(demoTimeRemaining % 60).toString().padStart(2, '0')}
-                </b>
-              </div>
-
-              <div className="p-2 rounded-xl bg-slate-800/50 border border-slate-700/60 flex items-center justify-center gap-2">
-                <Clock className="w-4 h-4 text-amber-400" />
-                <span className="text-slate-300">Minut Meci:</span>
-                <b className="font-mono text-amber-300">{demoMinute}&apos; / 90&apos;</b>
-              </div>
-            </div>
-
-            {/* Guidance for starter card population (No global livescore ticker) */}
-            <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-center">
-              <span className="text-xs text-slate-300 font-medium leading-relaxed block">
-                🎯 Evenimentele se transmit live direct pe cardurile titularilor tăi de mai jos. Apasă pe orice jucător titular pentru a vedea detaliat acțiunile și punctajul live!
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Simulation Minute-by-Minute Live Engine Controller Strip */}
-      <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-2xl flex items-center justify-between text-xs shadow-sm flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <span className="flex h-2.5 w-2.5 relative">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-600"></span>
-          </span>
-          <div>
-            <span className="text-white font-bold block text-xs">Etapa 12 în Desfășurare</span>
-            <span className="text-[10px] text-slate-400">Motor Live Minute-by-Minute</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div className="flex items-center bg-slate-800 rounded-xl p-0.5 border border-slate-700">
-            {[1, 2, 5].map((speed) => (
-              <button
-                key={speed}
-                onClick={() => setSimulationSpeed(speed)}
-                className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold transition-colors ${
-                  simulationSpeed === speed
-                    ? 'bg-emerald-500 text-slate-950'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {speed}x
-              </button>
-            ))}
-          </div>
-
-          <button
-            onClick={toggleSimulation}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl font-bold transition-all ${
-              isSimulating
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
-                : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400 shadow-md shadow-emerald-500/20'
-            }`}
-          >
-            {isSimulating ? (
-              <>
-                <Pause className="w-3.5 h-3.5" /> Pauză
-              </>
-            ) : (
-              <>
-                <Play className="w-3.5 h-3.5 fill-current" /> Pornește
-              </>
-            )}
-          </button>
-        </div>
-      </div>
 
       {/* Main Sub-Navigation Tabs */}
       <div className="flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-2xl">
@@ -581,15 +635,49 @@ export const LiveMatchdayView: React.FC = () => {
       {/* TAB 1: JUCĂTORII MEI PENTRU ETAPA CURENTĂ (CORE REQUIREMENT) */}
       {activeTab === 'myPlayers' && (
         <div className="space-y-4">
+          {/* Craiova vs Botoșani Live Match Sync Card */}
+          <div className="p-3 bg-gradient-to-r from-blue-950/70 via-slate-900 to-slate-900 border border-blue-500/40 rounded-2xl flex items-center justify-between gap-3 shadow-md flex-wrap">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-black text-xs shrink-0 shadow">
+                UCV
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs font-black text-white">Meci Live: Universitatea Craiova vs FC Botoșani</span>
+                  <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    Sportmonks #19729653
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-300 truncate mt-0.5">
+                  11 Titulari + 4 Rezerve · Toate regulile de azi active: gol echipă (±5p), greșeli Popescu (51&apos;), rezerve cu minut exact
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => applyCraiovaBotosaniSquad()}
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-slate-950 text-xs font-black transition-all shadow-md shadow-blue-500/20 active:scale-95 flex items-center gap-1.5"
+              >
+                <span>Aplică Lotul Craiova</span>
+              </button>
+              <button
+                onClick={() => refreshSportmonksLiveScores()}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all border border-slate-700"
+                title="Reîmprospătează scorurile live"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
           {/* Top Quick Stats Strip */}
           <div className="grid grid-cols-3 gap-2">
             <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-center">
-              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-0.5">
                 Puncte Etapă
               </span>
-              <span className="font-mono text-xl font-black text-amber-400 block mt-0.5">
-                {rawSquadPointsMatchday} pts
-              </span>
+              <AnimatedScoreBadge score={rawSquadPointsMatchday} prefixPlus={false} suffix="pts" size="lg" />
               {isOverdraftPenalized && (
                 <span className="text-[9px] font-bold text-amber-400 block mt-0.5">
                   (0 pts în clasament)
@@ -616,49 +704,132 @@ export const LiveMatchdayView: React.FC = () => {
             </div>
           </div>
 
-          {/* Section: Titulari (Primul 11) */}
-          <div className="space-y-2.5">
-            <div className="flex items-center justify-between px-1">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                  Titulari în Etapă ({starterPlayers.length}/11)
-                </h3>
-              </div>
-              <span className="text-[11px] text-slate-400">
-                Apasă pe orice jucător pentru <b>Flux Evenimente Live</b>
+          {/* Sub-view toggle & Sorting Indicator */}
+          <div className="flex items-center justify-between gap-2 p-1.5 bg-slate-900/90 border border-slate-800 rounded-2xl flex-wrap">
+            <div className="flex items-center gap-1.5 px-1.5">
+              <span className="text-[11px] font-bold text-slate-300">Ierarhie Live:</span>
+              <span className="text-[10px] text-emerald-400 font-mono font-bold bg-emerald-950/60 border border-emerald-800/80 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Top puncte sus ⬇
               </span>
             </div>
-
-            {starterPlayers.length === 0 ? (
-              <div className="p-6 rounded-2xl bg-slate-900/60 border border-dashed border-slate-800 text-center text-xs text-slate-400">
-                Nu ai selectat încă niciun titular în primul 11. Mergi la secțiunea <b>Echipa</b> pentru a-ți așeza formația!
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {starterPlayers.map((p) => renderPlayerRow(p, true))}
-              </div>
-            )}
+            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800/80">
+              <button
+                onClick={() => setSquadViewMode('sections')}
+                className={`py-1 px-2.5 rounded-lg text-[10px] font-bold transition-all ${
+                  squadViewMode === 'sections'
+                    ? 'bg-emerald-500 text-slate-950 shadow-sm font-black'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Titulari &amp; Bancă
+              </button>
+              <button
+                onClick={() => setSquadViewMode('allRanked')}
+                className={`py-1 px-2.5 rounded-lg text-[10px] font-bold transition-all ${
+                  squadViewMode === 'allRanked'
+                    ? 'bg-emerald-500 text-slate-950 shadow-sm font-black'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Clasament Lot (1-15)
+              </button>
+            </div>
           </div>
 
-          {/* Section: Rezerve pe bancă */}
-          {benchPlayers.length > 0 && (
-            <div className="space-y-2.5 pt-2">
+          {squadViewMode === 'sections' ? (
+            <>
+              {/* Section: Titulari (Primul 11) - Sortați descrescător după puncte */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between px-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                      Titulari în Etapă ({starterPlayers.length}/11)
+                    </h3>
+                  </div>
+                  <span className="text-[11px] text-slate-400">
+                    Apasă pentru <b>Flux Evenimente</b>
+                  </span>
+                </div>
+
+                {sortedStarterPlayers.length === 0 ? (
+                  <div className="p-6 rounded-2xl bg-slate-900/60 border border-dashed border-slate-800 text-center text-xs text-slate-400">
+                    Nu ai selectat încă niciun titular în primul 11. Mergi la secțiunea <b>Echipa</b> pentru a-ți așeza formația!
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {sortedStarterPlayers.map((p, idx) => renderPlayerRow(p, true, idx))}
+                  </div>
+                )}
+              </div>
+
+              {/* Section: Rezerve pe bancă - Sortate descrescător după puncte */}
+              {sortedBenchPlayers.length > 0 && (
+                <div className="space-y-2.5 pt-2">
+                  <div className="flex items-center justify-between px-1">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-slate-500" />
+                      <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                        Bancă de Rezerve ({benchPlayers.length})
+                      </h3>
+                    </div>
+                    <span className="text-[11px] text-slate-500">Flux meciuri</span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {sortedBenchPlayers.map((p, idx) => renderPlayerRow(p, false, idx + sortedStarterPlayers.length))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            /* Mod Vizualizare: Clasament Unificat Toți Jucătorii din Lot (1 - 15) */
+            <div className="space-y-2.5">
               <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-slate-500" />
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                    Bancă de Rezerve ({benchPlayers.length})
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                    Clasament Lot ({sortedAllSquadPlayers.length} Jucători)
                   </h3>
                 </div>
-                <span className="text-[11px] text-slate-500">Flux meciuri</span>
+                <span className="text-[11px] text-slate-400">
+                  Ordonat strict după punctaj
+                </span>
               </div>
 
               <div className="space-y-2">
-                {benchPlayers.map((p) => renderPlayerRow(p, false))}
+                {sortedAllSquadPlayers.map((item, idx) =>
+                  renderPlayerRow(item.player, item.isStarter, idx)
+                )}
               </div>
             </div>
           )}
+
+          {/* Legendă Culori Punctaje SuperManager */}
+          <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-2xl space-y-1.5">
+            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+              Legendă Culori Punctaj Live
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono font-bold">
+              <div className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between">
+                <span className="text-slate-400 font-sans font-normal">&lt; 25 pts:</span>
+                <span className="text-orange-600">Portocaliu închis</span>
+              </div>
+              <div className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between">
+                <span className="text-slate-400 font-sans font-normal">&lt; 50 pts:</span>
+                <span className="text-yellow-400">Galben</span>
+              </div>
+              <div className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between">
+                <span className="text-slate-400 font-sans font-normal">&lt; 100 pts:</span>
+                <span className="text-green-500">Verde normal</span>
+              </div>
+              <div className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between">
+                <span className="text-slate-400 font-sans font-normal">≥ 100 pts:</span>
+                <span className="text-[#39ff14] drop-shadow-[0_0_6px_rgba(57,255,20,0.6)]">Verde neon</span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -776,7 +947,9 @@ export const LiveMatchdayView: React.FC = () => {
 
             {selectedFixture?.events && selectedFixture.events.length > 0 ? (
               <div className="space-y-2.5">
-                {selectedFixture.events.map((ev) => {
+                {[...selectedFixture.events]
+                  .sort((a, b) => b.minute - a.minute)
+                  .map((ev) => {
                   const isStarter = Object.values(squad.startingSlots).includes(ev.playerId);
                   const isCaptain = squad.captainPlayerId === ev.playerId;
                   const ptsFinal = ev.pointsChange * (isCaptain ? 2 : 1);
@@ -1061,10 +1234,8 @@ export const LiveMatchdayView: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="text-right">
-                      <span className="font-mono text-sm font-bold text-amber-400 block">
-                        {p.pointsTotal} pts
-                      </span>
+                    <div className="text-right flex flex-col items-end">
+                      <AnimatedScoreBadge score={p.pointsTotal} prefixPlus={false} suffix="pts" size="sm" />
                       <span className="text-[10px] text-slate-400">+{p.pointsMatchday} în etapă</span>
                     </div>
                   </div>
@@ -1077,7 +1248,7 @@ export const LiveMatchdayView: React.FC = () => {
       {/* DEDICATED MODAL: FLUX EVENIMENTE LIVE & PUNCTE */}
       {selectedPlayerForLive && (
         <PlayerLiveStreamModal
-          player={selectedPlayerForLive.player}
+          player={players.find((p) => p.id === selectedPlayerForLive.player.id) || selectedPlayerForLive.player}
           fixture={selectedPlayerForLive.fixture}
           isCaptain={selectedPlayerForLive.isCaptain}
           isStarter={selectedPlayerForLive.isStarter}

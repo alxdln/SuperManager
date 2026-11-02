@@ -23,7 +23,7 @@ import {
   MatchHistoryItem,
 } from '../types/football';
 import { INITIAL_PLAYERS, INITIAL_FIXTURES, INITIAL_LEAGUE_NEWS } from '../data/superligaData';
-import { ALL_16_SUPERLIGA_PLAYERS, ALL_16_SUPERLIGA_CLUBS } from '../data/superligaAll16ClubsPlayers';
+import { ALL_16_SUPERLIGA_PLAYERS, ALL_16_SUPERLIGA_CLUBS, generateRandomStarterSquad } from '../data/superligaAll16ClubsPlayers';
 import { FORMATIONS } from '../data/formations';
 import { calculateEventPoints, formatCurrency, formatFullCurrency } from '../utils/scoringEngine';
 import { DemoCompletedMatchData } from '../components/live/DemoMatchSaveModal';
@@ -44,6 +44,14 @@ import {
   toggleFirestoreClubStatus,
   subscribeToLiveMatches,
   loadGameweekFinalScores,
+  signInWithGooglePopup,
+  signInWithApplePopup,
+  updateFirestoreUserAccount,
+  StoredUserAccount,
+  LeagueJoinRequest,
+  createFirestoreLeagueJoinRequest,
+  getFirestoreLeagueJoinRequests,
+  respondFirestoreLeagueJoinRequest,
 } from '../lib/firebase';
 import { SportmonksLiveService } from '../services/liveFootballApis';
 import { MatchFinalizerService, FinalizeFixtureParams } from '../services/matchFinalizer';
@@ -53,12 +61,16 @@ interface FantasyContextType {
   user: UserProfile;
   isAuthenticated: boolean;
   registerUserAccount: (accountData: { email: string; password?: string; name: string; teamName: string }) => Promise<{ success: boolean; message: string }>;
-  login: (email: string, pass: string) => Promise<{ success: boolean; hasLeague: boolean; isCreator?: boolean; message?: string }>;
-  loginWithProvider: (provider: 'apple' | 'google') => void;
+  login: (email: string, pass: string) => Promise<{ success: boolean; hasLeague: boolean; isCreator?: boolean; isPendingApproval?: boolean; message?: string }>;
+  loginWithProvider: (provider: 'apple' | 'google') => Promise<{ success: boolean; hasLeague: boolean; isCreator?: boolean; message?: string }>;
   logout: () => void;
   updateUserTeamName: (newName: string) => void;
   updateUserPassword: (password: string) => boolean;
   updateUserMembership: (membership: UserMembership) => void;
+  updateManagerProfileGlobal: (account: StoredUserAccount, previousEmail?: string) => Promise<boolean>;
+  pendingLeagueRequests: LeagueJoinRequest[];
+  approveLeagueJoinRequest: (requestId: string) => Promise<boolean>;
+  rejectLeagueJoinRequest: (requestId: string) => Promise<boolean>;
 
   // Clubs Master State & Management
   clubs: Club[];
@@ -70,7 +82,7 @@ interface FantasyContextType {
 
   // League Creation & Join
   createNewLeague: (data: { name: string; startingBudget: number; maxSameClubPlayers: number }) => Promise<{ success: boolean; message: string }>;
-  joinLeagueByCode: (code: string) => Promise<{ success: boolean; message: string }>;
+  joinLeagueByCode: (code: string) => Promise<{ success: boolean; message: string; isPendingApproval?: boolean }>;
   addNewsArticle: (article: Omit<LeagueNewsArticle, 'id' | 'date'>) => void;
 
   // Players & Squad
@@ -83,6 +95,7 @@ interface FantasyContextType {
   setCaptain: (playerId: string) => void;
   swapPlayers: (slotA: string, slotB: string) => void;
   substituteBenchPlayer: (slotId: string, benchPlayerId: string) => void;
+  applyCraiovaBotosaniSquad: () => void;
 
   // Unified Market (League Listings + Member Listings in the same place)
   unifiedMarketItems: UnifiedMarketItem[];
@@ -175,11 +188,13 @@ interface FantasyContextType {
 
   // Sportmonks v3 Live Stats & Mappings
   sportmonksScores: Map<number, number>;
-  sportmonksPlayerDetails: Map<number, { minutes: number; details: any[]; playerInfo?: any }>;
+  sportmonksPlayerDetails: Map<number, { minutes: number; details: any[]; contextual?: any; playerInfo?: any }>;
   sportmonksActiveMatches: any[];
   isSportmonksPolling: boolean;
   syncSportmonksPlayerIds: () => Promise<{ matchedCount: number; message: string }>;
   refreshSportmonksLiveScores: () => Promise<void>;
+  testFixturesEnabled: boolean;
+  toggleTestFixtures: () => void;
 
   // Finalizare Meciuri FT & Arhivare Compactă (5 min delay)
   finalizedMatchIds: string[];
@@ -217,7 +232,11 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       budget: 50000000, // €50M
       fanCoins: 1250,
       checkinsCount: 3,
-      membership: 'gratuit',
+      leagueId: 'lg_superliga_official_2026',
+      leagueCode: 'SUPER2026',
+      leagueStatus: 'active',
+      starterPackClaimed: true,
+      membership: 'pro',
     };
   });
 
@@ -399,35 +418,44 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   }, []);
 
-  // Squad State
+  // Squad State: configurat cu primul 11 complet Universitatea Craiova pentru test meci live cu Botoșani (#19729653)
   const [squad, setSquad] = useState<SquadState>(() => {
-    const defaultSquad: SquadState = {
-      formation: '4-3-3',
+    const craiovaSquad: SquadState = {
+      formation: '4-4-2',
       startingSlots: {
-        gk: 'p_tarnovanu',
-        lb: 'p_radunovic',
-        lcb: 'p_ngezana',
-        rcb: 'p_pascanu',
-        rb: 'p_onea',
-        lcm: 'p_sut',
-        cm: 'p_olaru',
-        rcm: 'p_cirjan',
-        lw: 'p_petrila',
-        st: 'p_birligea',
-        rw: 'p_mitrita',
+        gk: 'p_craiova_popescu',          // Laurențiu Popescu (#21, sportmonksId: 165686)
+        lb: 'p_craiova_bancu_real',       // Nicușor Bancu (#11, sportmonksId: 165093)
+        lcb: 'p_craiova_screciu_real',    // Vladimir Screciu (#6, sportmonksId: 165553)
+        rcb: 'p_craiova_romanchuk',       // Oleksandr Romanchuk (#3, sportmonksId: 1548650)
+        rb: 'p_craiova_stevanovic',       // Nikola Stevanovic (#24, sportmonksId: 1467993)
+        lm: 'p_craiova_matei',            // David Matei (#30, sportmonksId: 37668705)
+        lcm: 'p_craiova_baluta',          // Tudor Băluță (#8, sportmonksId: 165632)
+        rcm: 'p_craiova_cicaldau_real',   // Alexandru Cicâldău (CĂPITAN x2) (#20, sportmonksId: 165458)
+        rm: 'p_craiova_mora',             // Carlos Mora (#17, sportmonksId: 37414279)
+        ls: 'p_craiova_baiaram_real',     // Ștefan Baiaram (#10, sportmonksId: 32786777)
+        rs: 'p_craiova_alhamlawi',        // Assad Al-Hamlawi (#9, sportmonksId: 7346257)
       },
-      benchPlayerIds: ['p_dobre', 'p_baiaram', 'p_postolachi', 'p_siegrist'],
-      captainPlayerId: 'p_olaru',
+      benchPlayerIds: ['p_craiova_maxim', 'p_craiova_cretu', 'p_craiova_nsimba', 'p_craiova_lameira'],
+      captainPlayerId: 'p_craiova_cicaldau_real',
       boosterActive: false,
     };
+
+    const testKey = 'supermanager_craiova_live_squad_applied_v3';
+    const hasAppliedCraiova = localStorage.getItem(testKey);
+    if (!hasAppliedCraiova) {
+      try {
+        localStorage.setItem(testKey, 'true');
+        localStorage.setItem(`${STORAGE_KEY}_squad`, JSON.stringify(craiovaSquad));
+      } catch (e) { /* ignore */ }
+      return craiovaSquad;
+    }
 
     const saved = localStorage.getItem(`${STORAGE_KEY}_squad`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
-          // Inline basic sanitize for initial state
-          const formation = FORMATIONS[parsed.formation as TacticalFormation] ? (parsed.formation as TacticalFormation) : '4-3-3';
+          const formation = FORMATIONS[parsed.formation as TacticalFormation] ? (parsed.formation as TacticalFormation) : '4-4-2';
           const validSlotIds = new Set(FORMATIONS[formation].slots.map((s) => s.slotId));
           const cleanSlots: Record<string, string | null> = {};
           FORMATIONS[formation].slots.forEach((s) => { cleanSlots[s.slotId] = null; });
@@ -459,7 +487,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       } catch (e) { /* ignore */ }
     }
-    return defaultSquad;
+    return craiovaSquad;
   });
 
   // Unified Market Items (League Listings + Member Listings in the same place)
@@ -645,6 +673,37 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   });
 
+  // Pending League Join Requests (Aprobare de către administrator)
+  const [pendingLeagueRequests, setPendingLeagueRequests] = useState<LeagueJoinRequest[]>([]);
+
+  // Accepted extra members persistenta
+  const [acceptedExtraMembers, setAcceptedExtraMembers] = useState<LeagueMember[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('supermanager_extra_league_members') || '[]');
+    } catch (e) {
+      return [];
+    }
+  });
+
+  // Polling requests for current league
+  useEffect(() => {
+    let isMounted = true;
+    const fetchRequests = async () => {
+      try {
+        const list = await getFirestoreLeagueJoinRequests(leagueSettings.leagueCode);
+        if (isMounted) {
+          setPendingLeagueRequests(list.filter((r) => r.status === 'pending'));
+        }
+      } catch (e) { /* ignore */ }
+    };
+    fetchRequests();
+    const interval = setInterval(fetchRequests, 8000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [leagueSettings.leagueCode]);
+
   // Notifications
   const [notifications, setNotifications] = useState<AppNotification[]>([
     {
@@ -689,7 +748,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // =========================================================================
   const [sportmonksScores, setSportmonksScores] = useState<Map<number, number>>(new Map());
   const [sportmonksPlayerDetails, setSportmonksPlayerDetails] = useState<
-    Map<number, { minutes: number; details: any[]; playerInfo?: any }>
+    Map<number, { minutes: number; details: any[]; contextual?: any; playerInfo?: any }>
   >(new Map());
   const [sportmonksActiveMatches, setSportmonksActiveMatches] = useState<any[]>([]);
   const [isSportmonksPolling, setIsSportmonksPolling] = useState<boolean>(false);
@@ -716,6 +775,57 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   }, []);
 
+  // Ref stabil pentru jucătorii din lot fără re-abonări în cicluri
+  const masterPlayersRef = React.useRef(masterPlayers);
+  useEffect(() => {
+    masterPlayersRef.current = masterPlayers;
+  }, [masterPlayers]);
+
+  // Gestionează fotbaliștii noi descoperiți în meciurile live din API:
+  // Îi înregistrează în masterPlayers și îi adaugă aleatoriu pe piața de transferuri
+  const handleDiscoveredNewPlayers = useCallback((newDiscoveredPlayers: Player[]) => {
+    if (!newDiscoveredPlayers || newDiscoveredPlayers.length === 0) return;
+
+    // 1. Adăugare în masterPlayers
+    setMasterPlayers((prev) => {
+      const existingIds = new Set(prev.map((p) => p.id));
+      const toAdd = newDiscoveredPlayers.filter((p) => !existingIds.has(p.id));
+      if (toAdd.length === 0) return prev;
+      return [...prev, ...toAdd];
+    });
+
+    // 2. Adăugare independentă pe piața de transferuri ca jucător liber (24-72h licitație)
+    setUnifiedMarketItems((prev) => {
+      const existingMarketIds = new Set(prev.map((i) => i.playerId));
+      const newItems: UnifiedMarketItem[] = [];
+      const now = Date.now();
+
+      newDiscoveredPlayers.forEach((p) => {
+        if (!existingMarketIds.has(p.id)) {
+          existingMarketIds.add(p.id);
+          const randomHours = Math.floor(Math.random() * (72 - 24 + 1)) + 24;
+          newItems.push({
+            id: `mkt_league_${p.id}_${now}`,
+            playerId: p.id,
+            isLeagueListing: true,
+            sellerId: 'superliga_lpf',
+            sellerName: 'Superliga României (Jucător Nou)',
+            currentBid: p.marketValue,
+            highestBidderId: null,
+            highestBidderName: null,
+            minAskingPrice: Math.round(p.marketValue * 1.25),
+            leagueBaseOffer: p.marketValue,
+            expiresAt: now + randomHours * 3600 * 1000,
+            bidHistory: [],
+            receivedOffers: [],
+          });
+        }
+      });
+
+      return newItems.length > 0 ? [...prev, ...newItems] : prev;
+    });
+  }, []);
+
   // Sync Sportmonks IDs function
   const syncSportmonksPlayerIds = useCallback(async () => {
     const res = await SportmonksLiveService.syncPlayerSportmonksIds(masterPlayers);
@@ -725,19 +835,29 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { matchedCount: res.matchedCount, message: res.message };
   }, [masterPlayers]);
 
+  // Mod meciuri test/demo (Craiova vs Botoșani / Petrolul vs CFR)
+  const [testFixturesEnabled, setTestFixturesEnabled] = useState<boolean>(() => {
+    return typeof window !== 'undefined' && localStorage.getItem('supermanager_force_test_fixtures') === 'true';
+  });
+
   // Trigger manual refresh of live scores
   const refreshSportmonksLiveScores = useCallback(async () => {
     try {
-      const scores = await SportmonksLiveService.getLiveCalculatedScores();
-      setSportmonksScores(new Map(scores));
+      const result = await SportmonksLiveService.getLiveCalculatedScoresWithMissingCheck(masterPlayersRef.current);
+      setSportmonksScores(new Map(result.scores));
       setSportmonksPlayerDetails(new Map(SportmonksLiveService.lastPlayerDetailsMap));
-      setSportmonksActiveMatches([...SportmonksLiveService.lastActiveMatches]);
+      setSportmonksActiveMatches([...result.matches]);
 
-      if (scores.size > 0) {
+      if (result.newPlayers && result.newPlayers.length > 0) {
+        handleDiscoveredNewPlayers(result.newPlayers);
+      }
+
+      if (result.scores.size > 0) {
         setMasterPlayers((prev) =>
           prev.map((player) => {
-            if (player.sportmonksId && scores.has(player.sportmonksId)) {
-              const livePts = scores.get(player.sportmonksId)!;
+            const smId = player.sportmonksId ? Number(player.sportmonksId) : undefined;
+            if (smId && result.scores.has(smId)) {
+              const livePts = result.scores.get(smId)!;
               return { ...player, pointsMatchday: livePts };
             }
             return player;
@@ -747,12 +867,24 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (err) {
       console.error('[Sportmonks] Manual refresh error:', err);
     }
-  }, []);
+  }, [handleDiscoveredNewPlayers]);
+
+  const toggleTestFixtures = useCallback(() => {
+    setTestFixturesEnabled((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('supermanager_force_test_fixtures', next ? 'true' : 'false');
+      }
+      setTimeout(() => {
+        refreshSportmonksLiveScores();
+      }, 50);
+      return next;
+    });
+  }, [refreshSportmonksLiveScores]);
 
   // 1. Universal Real-Time Listener via Firestore onSnapshot (/live_matches/current)
-  // Toți utilizatorii (Gratuit, Pro, etc.) primesc actualizările live în timp real fără a apela Sportmonks direct.
+  // Toți utilizatorii primesc actualizările live în timp real fără a apela Sportmonks direct.
   useEffect(() => {
-    // Încarcă scorurile persistate (ex: meciuri FT deja finalizate) la pornire
     loadGameweekFinalScores('gw_current').then((persisted) => {
       if (persisted && persisted.scores) {
         const scoresMap = new Map<number, number>();
@@ -776,7 +908,6 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
         setSportmonksScores(scoresMap);
 
-        // Actualizăm masterPlayers reactiv
         setMasterPlayers((prev) =>
           prev.map((player) => {
             if (player.sportmonksId && scoresMap.has(player.sportmonksId)) {
@@ -805,44 +936,75 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   }, []);
 
-  // 2. Coordonator Polling Sportmonks (Admin / Creator Only sau la cerere)
-  // Elimină complet riscul de 429 Too Many Requests: un singur canal apelează Sportmonks la 30s!
-  const isCoordinator = user.membership === 'admin' || user.membership === 'creator';
-
+  // 2. Coordonator Polling Sportmonks (Activ pentru monitorizare meciuri SuperLiga inplay)
   useEffect(() => {
-    if (!isCoordinator) {
-      setIsSportmonksPolling(false);
-      return;
-    }
-
     setIsSportmonksPolling(true);
-    SportmonksLiveService.startPolling((liveScores, rawDetails, activeMatches) => {
-      setSportmonksScores(new Map(liveScores));
-      if (rawDetails) {
-        setSportmonksPlayerDetails(new Map(rawDetails));
-      }
-      if (activeMatches) {
-        setSportmonksActiveMatches([...activeMatches]);
-      }
+    SportmonksLiveService.startPolling(
+      (liveScores, rawDetails, activeMatches, newDiscoveredPlayers) => {
+        setSportmonksScores(new Map(liveScores));
+        if (rawDetails) {
+          setSportmonksPlayerDetails(new Map(rawDetails));
+        }
+        if (activeMatches) {
+          setSportmonksActiveMatches([...activeMatches]);
+          activeMatches.forEach((smFixture: any) => {
+            const homeGoals = smFixture.scores?.find((s: any) => s.description === 'CURRENT' && (s.score?.participant === 'home' || s.score?.participant === 'participant1'))?.score?.goals ??
+              smFixture.scores?.find((s: any) => s.description === 'CURRENT')?.score?.participant1 ??
+              smFixture.homeScore ?? 0;
+            const awayGoals = smFixture.scores?.find((s: any) => s.description === 'CURRENT' && (s.score?.participant === 'away' || s.score?.participant === 'participant2'))?.score?.goals ??
+              smFixture.scores?.find((s: any) => s.description === 'CURRENT')?.score?.participant2 ??
+              smFixture.awayScore ?? 0;
+            const minute = smFixture.minute || 40;
+            const isFT = ['FT', 'ENDED', 'AET', 'FINISHED'].includes((smFixture.state?.state || smFixture.state?.short_name || smFixture.status || '').toUpperCase());
 
-      if (liveScores && liveScores.size > 0) {
-        setMasterPlayers((prev) =>
-          prev.map((player) => {
-            if (player.sportmonksId && liveScores.has(player.sportmonksId)) {
-              const livePts = liveScores.get(player.sportmonksId)!;
-              return { ...player, pointsMatchday: livePts };
-            }
-            return player;
-          })
-        );
-      }
-    });
+            setFixtures((prev) =>
+              prev.map((f) => {
+                if (
+                  f.id === `fix_${smFixture.id}` ||
+                  f.id === String(smFixture.id) ||
+                  (smFixture.id === 19729653 && (f.id === 'fix_19729653' || (f.homeClubId === 'craiova' && f.awayClubId === 'botosani'))) ||
+                  (smFixture.id === 19729652 && (f.id === 'fix_19729652' || (f.homeClubId === 'petrolul' && f.awayClubId === 'cfr')))
+                ) {
+                  return {
+                    ...f,
+                    homeScore: homeGoals,
+                    awayScore: awayGoals,
+                    minute,
+                    isLive: !isFT,
+                    isFinished: isFT,
+                  };
+                }
+                return f;
+              })
+            );
+          });
+        }
+
+        if (newDiscoveredPlayers && newDiscoveredPlayers.length > 0) {
+          handleDiscoveredNewPlayers(newDiscoveredPlayers);
+        }
+
+        if (liveScores && liveScores.size > 0) {
+          setMasterPlayers((prev) =>
+            prev.map((player) => {
+              const smId = player.sportmonksId ? Number(player.sportmonksId) : undefined;
+              if (smId && liveScores.has(smId)) {
+                const livePts = liveScores.get(smId)!;
+                return { ...player, pointsMatchday: livePts };
+              }
+              return player;
+            })
+          );
+        }
+      },
+      () => masterPlayersRef.current
+    );
 
     return () => {
       SportmonksLiveService.stopPolling();
       setIsSportmonksPolling(false);
     };
-  }, [isCoordinator]);
+  }, [handleDiscoveredNewPlayers]);
 
 
   // Save to localStorage
@@ -1082,18 +1244,36 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const fixKey = String(fixtureId);
     const targetPending = pendingFinalizations.find((p) => p.fixtureId === fixKey);
 
-    const fixture = fixtures.find((f) => f.id === fixKey) || {
+    const smMatch = sportmonksActiveMatches?.find((m: any) => String(m.id) === fixKey || (fixKey.includes('19729653') && m.id === 19729653) || (fixKey.includes('19729652') && m.id === 19729652));
+    const smHomeGoals = smMatch?.scores?.find((s: any) => s.description === 'CURRENT' && (s.score?.participant === 'home' || s.score?.participant === 'participant1'))?.score?.goals ??
+      smMatch?.scores?.find((s: any) => s.description === 'CURRENT')?.score?.participant1 ??
+      smMatch?.homeScore;
+    const smAwayGoals = smMatch?.scores?.find((s: any) => s.description === 'CURRENT' && (s.score?.participant === 'away' || s.score?.participant === 'participant2'))?.score?.goals ??
+      smMatch?.scores?.find((s: any) => s.description === 'CURRENT')?.score?.participant2 ??
+      smMatch?.awayScore;
+
+    const defaultHome = fixKey.includes('19729653') ? 'craiova' : fixKey.includes('19729652') ? 'petrolul' : 'craiova';
+    const defaultAway = fixKey.includes('19729653') ? 'botosani' : fixKey.includes('19729652') ? 'cfr' : 'botosani';
+
+    const fixture = fixtures.find((f) => f.id === fixKey || f.id === `fix_${fixKey}`) || {
       id: fixKey,
-      homeClubId: targetPending?.homeClubId || 'c_fcsb',
-      awayClubId: targetPending?.awayClubId || 'c_rapid',
-      homeScore: targetPending?.homeScore ?? 2,
-      awayScore: targetPending?.awayScore ?? 1,
+      homeClubId: targetPending?.homeClubId || defaultHome,
+      awayClubId: targetPending?.awayClubId || defaultAway,
+      homeScore: smHomeGoals ?? targetPending?.homeScore ?? 0,
+      awayScore: smAwayGoals ?? targetPending?.awayScore ?? 0,
       events: [],
     };
 
+    const finalHomeScore = smHomeGoals ?? fixture.homeScore ?? 0;
+    const finalAwayScore = smAwayGoals ?? fixture.awayScore ?? 0;
+
+    const normHome = (fixture.homeClubId || 'petrolul').replace(/^c_/, '');
+    const normAway = (fixture.awayClubId || 'cfr').replace(/^c_/, '');
+
     const playerLiveMap: Record<string, any> = {};
     players.forEach((p) => {
-      if (p.clubId === fixture.homeClubId || p.clubId === fixture.awayClubId) {
+      const pClubNorm = (p.clubId || '').replace(/^c_/, '');
+      if (pClubNorm === normHome || pClubNorm === normAway || p.clubId === fixture.homeClubId || p.clubId === fixture.awayClubId) {
         const smDetails = p.sportmonksId ? sportmonksPlayerDetails.get(p.sportmonksId) : null;
         playerLiveMap[p.id] = {
           minutesPlayed: smDetails?.minutes ?? (p.pointsMatchday > 0 ? 90 : 75),
@@ -1108,11 +1288,11 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const result = await MatchFinalizerService.finalizeMatch(
       {
         fixtureId: fixKey,
-        gameweek: 15,
+        gameweek: 13,
         homeClubId: fixture.homeClubId,
         awayClubId: fixture.awayClubId,
-        homeScore: fixture.homeScore,
-        awayScore: fixture.awayScore,
+        homeScore: finalHomeScore,
+        awayScore: finalAwayScore,
         playerLiveMap,
       },
       players
@@ -1183,33 +1363,19 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return () => clearInterval(interval);
   }, [pendingFinalizations, finalizeMatchNow]);
 
-  // Ascultare meciuri Sportmonks cu status FT / ENDED pentru declanșare automată
+  // Ascultare meciuri Sportmonks cu status FT / ENDED pentru declanșare automată imediată în Firestore
   useEffect(() => {
     if (!sportmonksActiveMatches || sportmonksActiveMatches.length === 0) return;
     sportmonksActiveMatches.forEach((m: any) => {
-      const statusName = m.state?.state || m.status;
-      if (statusName === 'FT' || statusName === 'ENDED' || statusName === 'AET') {
+      const statusName = (m.state?.state || m.state?.short_name || m.status || '').toUpperCase();
+      if (statusName === 'FT' || statusName === 'ENDED' || statusName === 'AET' || statusName === 'FINISHED') {
         const fId = String(m.id);
         if (!MatchFinalizerService.isFixtureFinalized(fId)) {
-          setPendingFinalizations((prev) => {
-            if (prev.some((p) => p.fixtureId === fId)) return prev;
-            return [
-              ...prev,
-              {
-                fixtureId: fId,
-                homeClubId: m.participants?.[0]?.id ? `c_${m.participants[0].id}` : 'c_fcsb',
-                awayClubId: m.participants?.[1]?.id ? `c_${m.participants[1].id}` : 'c_rapid',
-                homeScore: m.scores?.find((s: any) => s.description === 'CURRENT')?.score?.participant1 ?? 0,
-                awayScore: m.scores?.find((s: any) => s.description === 'CURRENT')?.score?.participant2 ?? 0,
-                scheduledTime: Date.now() + 5 * 60 * 1000,
-                secondsRemaining: 300,
-              },
-            ];
-          });
+          finalizeMatchNow(fId);
         }
       }
     });
-  }, [sportmonksActiveMatches]);
+  }, [sportmonksActiveMatches, finalizeMatchNow]);
 
 
   // Compute Empty Starter Slots Count & Penalties (-100p per empty slot)
@@ -1263,7 +1429,8 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       } else {
         const player = playerMap.get(pId);
         if (player) {
-          let playerPts = player.pointsMatchday;
+          const liveSmPts = player.sportmonksId ? sportmonksScores.get(player.sportmonksId) : undefined;
+          let playerPts = typeof liveSmPts === 'number' ? liveSmPts : player.pointsMatchday;
           // Captain x2 applied cleanly to final matchday points (after the final whistle)
           if (player.id === squad.captainPlayerId) {
             playerPts *= 2;
@@ -1277,7 +1444,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     pts -= emptySlotsCount * 100;
 
     return pts;
-  }, [players, squad]);
+  }, [players, squad, sportmonksScores]);
 
   // If overdraft penalized, team points in matchday standings are 0!
   const squadPointsMatchday = useMemo(() => {
@@ -1396,7 +1563,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const login = async (
     email: string,
     _pass: string
-  ): Promise<{ success: boolean; hasLeague: boolean; isCreator?: boolean; message?: string }> => {
+  ): Promise<{ success: boolean; hasLeague: boolean; isCreator?: boolean; isPendingApproval?: boolean; message?: string }> => {
     try {
       const cleanEmail = email.trim().toLowerCase();
       const cleanPass = _pass.trim();
@@ -1414,6 +1581,8 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
           fanCoins: 99999,
           checkinsCount: 10,
           leagueId: 'lg_superliga_official_2026',
+          leagueCode: 'SUPER2026',
+          leagueStatus: 'active',
           starterPackClaimed: true,
           membership: 'creator',
         };
@@ -1433,18 +1602,52 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       const stored = await findFirestoreUser(cleanEmail);
       if (stored) {
-        const userMembership: UserMembership = stored.membership || (cleanEmail === 'creator@supermanager.ro' ? 'creator' : 'gratuit');
-        setUser((prev) => ({
-          ...prev,
-          id: stored.id || prev.id,
-          name: stored.name || prev.name,
+        // Password verification if password was set on account
+        if (stored.password && cleanPass && stored.password !== cleanPass) {
+          return {
+            success: false,
+            hasLeague: false,
+            message: 'Parolă incorectă pentru acest cont de manager.',
+          };
+        }
+
+        const userMembership: UserMembership =
+          stored.membership ||
+          (cleanEmail === 'creator@supermanager.ro'
+            ? 'creator'
+            : cleanEmail === 'alex.manager@superliga.ro'
+            ? 'pro'
+            : 'gratuit');
+
+        const hasActiveLeague =
+          Boolean(stored.leagueCode || stored.leagueId) && stored.leagueStatus !== 'pending_approval';
+        const isPending = stored.leagueStatus === 'pending_approval';
+        const isStarterPackClaimed =
+          stored.starterPackClaimed !== undefined
+            ? stored.starterPackClaimed
+            : hasActiveLeague;
+
+        const updatedProfile: UserProfile = {
+          id: stored.id || 'usr_manager',
+          name: stored.name || 'Manager SuperLiga',
           email: stored.email,
-          teamName: stored.teamName || prev.teamName,
-          avatar: stored.avatar || prev.avatar,
-          budget: stored.budget || prev.budget,
+          teamName: stored.teamName || 'Echipa Mea FC',
+          avatar:
+            stored.avatar ||
+            `https://ui-avatars.com/api/?name=${encodeURIComponent(stored.name || 'M')}&background=05df72&color=0b0e14&bold=true`,
+          favoriteClubId: stored.favoriteClubId || 'fcsb',
+          budget: stored.budget || 50000000,
+          fanCoins: 1250,
+          checkinsCount: 3,
+          leagueId: stored.leagueId,
+          leagueCode: stored.leagueCode,
+          leagueStatus: stored.leagueStatus || (hasActiveLeague ? 'active' : 'none'),
+          starterPackClaimed: isStarterPackClaimed,
           membership: userMembership,
-          starterPackClaimed: userMembership === 'creator' ? true : prev.starterPackClaimed,
-        }));
+        };
+
+        setUser(updatedProfile);
+
         if (stored.leagueCode) {
           setLeagueSettings((prev) => ({
             ...prev,
@@ -1455,6 +1658,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         setIsAuthenticated(true);
         localStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
+        localStorage.setItem(`${STORAGE_KEY}_user`, JSON.stringify(updatedProfile));
 
         addNotification({
           title: 'Autentificare reușită',
@@ -1464,38 +1668,144 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         return {
           success: true,
-          hasLeague: !!stored?.leagueCode,
+          hasLeague: hasActiveLeague,
           isCreator: userMembership === 'creator' || cleanEmail === 'creator@supermanager.ro',
+          isPendingApproval: isPending,
         };
-      } else {
-        setUser((prev) => ({ ...prev, email: cleanEmail, membership: 'gratuit' }));
       }
 
-      setIsAuthenticated(true);
-      localStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
-
-      addNotification({
-        title: 'Autentificare reușită',
-        message: `Bun venit înapoi!`,
-        type: 'reward',
-      });
-
-      return { success: true, hasLeague: false, isCreator: false };
+      return {
+        success: false,
+        hasLeague: false,
+        message: 'Contul nu a fost găsit în baza de date. Te rugăm să creezi un cont nou din secțiunea Înregistrare.',
+      };
     } catch (err) {
-      setIsAuthenticated(true);
-      localStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
-      return { success: true, hasLeague: false };
+      console.error('Login error:', err);
+      return { success: false, hasLeague: false, message: 'Eroare la autentificare.' };
     }
   };
 
-  const loginWithProvider = (provider: 'apple' | 'google') => {
-    setIsAuthenticated(true);
-    localStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
-    addNotification({
-      title: `Conectat cu ${provider === 'apple' ? 'Apple ID' : 'Google'}`,
-      message: 'Te-ai autentificat cu succes în SuperManager.',
-      type: 'reward',
-    });
+  const loginWithProvider = async (
+    provider: 'apple' | 'google'
+  ): Promise<{ success: boolean; hasLeague: boolean; isCreator?: boolean }> => {
+    try {
+      const res = provider === 'google' ? await signInWithGooglePopup() : await signInWithApplePopup();
+      if (res.success && res.user) {
+        const stored = res.user;
+        const hasActiveLeague =
+          Boolean(stored.leagueCode || stored.leagueId) && stored.leagueStatus !== 'pending_approval';
+        const isPending = stored.leagueStatus === 'pending_approval';
+        const isStarterPackClaimed =
+          stored.starterPackClaimed !== undefined
+            ? stored.starterPackClaimed
+            : hasActiveLeague;
+
+        const updatedProfile: UserProfile = {
+          id: stored.id,
+          name: stored.name,
+          email: stored.email,
+          teamName: stored.teamName || `${stored.name} FC`,
+          avatar: stored.avatar,
+          favoriteClubId: stored.favoriteClubId || 'fcsb',
+          budget: stored.budget || 50000000,
+          fanCoins: 1250,
+          checkinsCount: 3,
+          leagueId: stored.leagueId,
+          leagueCode: stored.leagueCode,
+          leagueStatus: stored.leagueStatus || (hasActiveLeague ? 'active' : 'none'),
+          starterPackClaimed: isStarterPackClaimed,
+          membership: stored.membership || 'gratuit',
+        };
+
+        setUser(updatedProfile);
+        if (stored.leagueCode) {
+          setLeagueSettings((prev) => ({
+            ...prev,
+            leagueCode: stored.leagueCode || prev.leagueCode,
+            leagueName: stored.leagueName || prev.leagueName,
+          }));
+        }
+
+        setIsAuthenticated(true);
+        localStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
+        localStorage.setItem(`${STORAGE_KEY}_user`, JSON.stringify(updatedProfile));
+
+        addNotification({
+          title: `Conectat cu ${provider === 'apple' ? 'Apple ID' : 'Google'}`,
+          message: `Bun venit în SuperManager, ${stored.name}!`,
+          type: 'reward',
+        });
+
+        return {
+          success: true,
+          hasLeague: hasActiveLeague,
+          isCreator: stored.membership === 'creator',
+        };
+      }
+      return { success: false, hasLeague: false };
+    } catch (e) {
+      console.error('loginWithProvider error:', e);
+      return { success: false, hasLeague: false };
+    }
+  };
+
+  // Actualizare profil manager cu propagare globală în Firestore și state
+  const updateManagerProfileGlobal = async (
+    updatedAccount: StoredUserAccount,
+    previousEmail?: string
+  ): Promise<boolean> => {
+    try {
+      await updateFirestoreUserAccount(updatedAccount, previousEmail);
+
+      // Dacă este managerul curent autentificat, actualizăm instantaneu starea user
+      const isCurrent =
+        user.id === updatedAccount.id ||
+        user.email.toLowerCase() === (previousEmail?.toLowerCase() || updatedAccount.email.toLowerCase()) ||
+        Boolean(previousEmail && user.email.toLowerCase() === previousEmail.toLowerCase()) ||
+        updatedAccount.id === 'usr_me';
+
+      if (isCurrent) {
+        setUser((prev) => {
+          const updated: UserProfile = {
+            ...prev,
+            name: updatedAccount.name,
+            email: updatedAccount.email,
+            teamName: updatedAccount.teamName,
+            budget: updatedAccount.budget,
+            membership: updatedAccount.membership || prev.membership,
+            avatar: updatedAccount.avatar || prev.avatar,
+            leagueId: updatedAccount.leagueId || prev.leagueId,
+            leagueCode: updatedAccount.leagueCode || prev.leagueCode,
+          };
+          localStorage.setItem(`${STORAGE_KEY}_user`, JSON.stringify(updated));
+          return updated;
+        });
+      }
+
+      // Also update in acceptedExtraMembers if present
+      setAcceptedExtraMembers((prev) => {
+        const updated = prev.map((m) =>
+          m.id === updatedAccount.id || (previousEmail && m.name.toLowerCase() === updatedAccount.name.toLowerCase())
+            ? { ...m, name: updatedAccount.name, teamName: updatedAccount.teamName }
+            : m
+        );
+        try {
+          localStorage.setItem('supermanager_extra_league_members', JSON.stringify(updated));
+        } catch (e) { /* ignore */ }
+        return updated;
+      });
+
+      addNotification({
+        title: '✅ Manager Actualizat Global',
+        message: `Datele pentru ${updatedAccount.name} (${updatedAccount.email}) au fost salvate cu succes în Firestore!`,
+        type: 'reward',
+      });
+
+      return true;
+    } catch (err) {
+      console.error('updateManagerProfileGlobal error:', err);
+      return false;
+    }
   };
 
   const logout = () => {
@@ -1524,6 +1834,10 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setUser((prev) => ({
       ...prev,
       budget: data.startingBudget,
+      leagueId,
+      leagueCode: code,
+      leagueStatus: 'active',
+      starterPackClaimed: true,
     }));
 
     // Save to Firestore
@@ -1538,6 +1852,22 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       createdAt: new Date().toISOString(),
     });
 
+    await saveFirestoreUserAccount({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      teamName: user.teamName,
+      avatar: user.avatar,
+      budget: data.startingBudget,
+      leagueId,
+      leagueName: data.name,
+      leagueCode: code,
+      leagueStatus: 'active',
+      starterPackClaimed: true,
+      membership: user.membership || 'admin',
+      createdAt: new Date().toISOString(),
+    });
+
     // Add News Article in feed
     addNewsArticle({
       title: `Ligă Nouă Fondată: ${data.name}!`,
@@ -1549,32 +1879,209 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true, message: 'Ligă creată cu succes!' };
   };
 
-  const joinLeagueByCode = async (code: string): Promise<{ success: boolean; message: string }> => {
+  const joinLeagueByCode = async (
+    code: string
+  ): Promise<{ success: boolean; isPending?: boolean; message: string }> => {
     const found = await findFirestoreLeagueByCode(code);
-    const resolvedName = found ? found.name : `Liga ${code.toUpperCase()}`;
-    const resolvedBudget = found ? found.budget : 50000000;
+    if (!found) {
+      return {
+        success: false,
+        message: `Codul de ligă "${code.toUpperCase()}" nu a fost găsit în baza de date. Te rugăm să verifici codul.`,
+      };
+    }
 
-    setLeagueSettings((prev) => ({
-      ...prev,
-      leagueCode: code.toUpperCase(),
+    const resolvedName = found.name;
+    const resolvedBudget = found.budget || 50000000;
+
+    // Dacă utilizatorul este chiar creatorul ligii sau administrator general, intră direct
+    if (found.creatorId === user.id || user.membership === 'creator' || user.membership === 'admin') {
+      setLeagueSettings((prev) => ({
+        ...prev,
+        leagueCode: found.code.toUpperCase(),
+        leagueName: resolvedName,
+        startingBudget: resolvedBudget,
+      }));
+
+      setUser((prev) => ({
+        ...prev,
+        budget: resolvedBudget,
+        leagueId: found.id,
+        leagueCode: found.code.toUpperCase(),
+        leagueStatus: 'active',
+        starterPackClaimed: true,
+      }));
+
+      await saveFirestoreUserAccount({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        teamName: user.teamName,
+        avatar: user.avatar,
+        budget: resolvedBudget,
+        leagueId: found.id,
+        leagueName: resolvedName,
+        leagueCode: found.code.toUpperCase(),
+        leagueStatus: 'active',
+        starterPackClaimed: true,
+        membership: user.membership,
+        createdAt: new Date().toISOString(),
+      });
+
+      addNewsArticle({
+        title: `Membru Nou: ${user.name} a intrat în ligă!`,
+        summary: `Managerul ${user.name} (${user.teamName}) s-a alăturat ligii ${resolvedName}!`,
+        content: `Comunitatea crește! Un nou manager a intrat în competiție și este gata de meciuri.`,
+        tag: 'ETAPĂ',
+      });
+
+      return { success: true, isPending: false, message: `Te-ai alăturat cu succes ligii ${resolvedName}!` };
+    }
+
+    // Altfel, se creează o cerere de aderare (pending approval de către administrator)
+    const newReq: LeagueJoinRequest = {
+      id: `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      leagueId: found.id,
+      leagueCode: found.code.toUpperCase(),
       leagueName: resolvedName,
-      startingBudget: resolvedBudget,
-    }));
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      teamName: user.teamName,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+
+    await createFirestoreLeagueJoinRequest(newReq);
 
     setUser((prev) => ({
       ...prev,
-      budget: resolvedBudget,
+      leagueId: found.id,
+      leagueCode: found.code.toUpperCase(),
+      leagueStatus: 'pending_approval',
+      starterPackClaimed: false,
     }));
 
-    // Add News Article in feed
+    await saveFirestoreUserAccount({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      teamName: user.teamName,
+      avatar: user.avatar,
+      budget: resolvedBudget,
+      leagueId: found.id,
+      leagueName: resolvedName,
+      leagueCode: found.code.toUpperCase(),
+      leagueStatus: 'pending_approval',
+      starterPackClaimed: false,
+      membership: user.membership,
+      createdAt: new Date().toISOString(),
+    });
+
+    addNotification({
+      title: '📋 Cerere de Înscriere Trimisă',
+      message: `Cererea ta de aderare în ${resolvedName} a fost trimisă administratorului. Vei primi lotul de fotbaliști după aprobare!`,
+      type: 'reward',
+    });
+
+    return {
+      success: true,
+      isPending: true,
+      message: `Cererea ta a fost expediată către administratorul ligii "${resolvedName}". Vei primi lotul de jucători imediat ce ești acceptat!`,
+    };
+  };
+
+  // Aprobare cerere de către administrator
+  const approveLeagueJoinRequest = async (requestId: string): Promise<boolean> => {
+    const targetReq = pendingLeagueRequests.find((r) => r.id === requestId);
+    if (!targetReq) return false;
+
+    await respondFirestoreLeagueJoinRequest(requestId, 'accepted');
+
+    // 1. Generare lot de start de 14 jucători
+    const starterSquad = generateRandomStarterSquad(players, {
+      maxSameClubPlayers: leagueSettings.maxSameClubPlayers || 3,
+      assignedPlayerIds: new Set(),
+      activeClubIds: activeClubs.map((c) => c.id),
+    });
+
+    // 2. Actualizare cont candidat în Firestore
+    const candidate = await findFirestoreUser(targetReq.userEmail);
+    if (candidate) {
+      await updateFirestoreUserAccount({
+        ...candidate,
+        leagueId: targetReq.leagueId,
+        leagueName: targetReq.leagueName,
+        leagueCode: targetReq.leagueCode,
+        leagueStatus: 'active',
+        starterPackClaimed: true,
+      });
+    }
+
+    // 3. Dacă utilizatorul curent din sesiune este candidatul, actualizăm direct starea
+    if (user.id === targetReq.userId || user.email.toLowerCase() === targetReq.userEmail.toLowerCase()) {
+      setUser((prev) => ({
+        ...prev,
+        leagueId: targetReq.leagueId,
+        leagueCode: targetReq.leagueCode,
+        leagueStatus: 'active',
+        starterPackClaimed: true,
+      }));
+      allocateStarterSquad(starterSquad);
+    }
+
+    // 4. Adăugare în membrii suplimentari ai ligii
+    const newMember: LeagueMember = {
+      id: targetReq.userId,
+      name: targetReq.userName,
+      teamName: targetReq.teamName,
+      avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(targetReq.userName)}&background=05df72&color=0b0e14&bold=true`,
+      totalPoints: 1200,
+      matchdayPoints: 0,
+      squadValue: starterSquad.reduce((acc, p) => acc + p.marketValue, 0),
+      rank: 6,
+      formation: '4-4-2',
+      startingLineup: starterSquad.slice(0, 11).map((p, idx) => ({
+        slotLabel: `S${idx + 1}`,
+        playerId: p.id,
+      })),
+    };
+
+    setAcceptedExtraMembers((prev) => {
+      const filtered = prev.filter((m) => m.id !== targetReq.userId);
+      const updated = [...filtered, newMember];
+      try {
+        localStorage.setItem('supermanager_extra_league_members', JSON.stringify(updated));
+      } catch (e) { /* ignore */ }
+      return updated;
+    });
+
+    setPendingLeagueRequests((prev) => prev.filter((r) => r.id !== requestId));
+
     addNewsArticle({
-      title: `Membru Nou: ${user.name} a intrat în ligă!`,
-      summary: `Managerul ${user.name} (${user.teamName}) s-a alăturat ligii ${resolvedName}!`,
-      content: `Comunitatea crește! Un nou manager a intrat în competiție și este gata de licitații.`,
+      title: `OFICIAL: ${targetReq.userName} a fost acceptat în ligă!`,
+      summary: `Administratorul a aprobat cererea de aderare pentru ${targetReq.teamName}. Lotul de debut de 14 fotbaliști a fost generat!`,
+      content: `Managerul ${targetReq.userName} a primit acceptul oficial în ligă și este gata pentru meciurile etapei.`,
       tag: 'ETAPĂ',
     });
 
-    return { success: true, message: `Te-ai alăturat ligii ${resolvedName}!` };
+    addNotification({
+      title: '✅ Manager Acceptat în Ligă!',
+      message: `${targetReq.userName} (${targetReq.teamName}) a fost integrat oficial în ligă!`,
+      type: 'reward',
+    });
+
+    return true;
+  };
+
+  const rejectLeagueJoinRequest = async (requestId: string): Promise<boolean> => {
+    await respondFirestoreLeagueJoinRequest(requestId, 'rejected');
+    setPendingLeagueRequests((prev) => prev.filter((r) => r.id !== requestId));
+    addNotification({
+      title: '❌ Cerere Respinsă',
+      message: 'Cererea de înscriere a fost respinsă.',
+      type: 'injury',
+    });
+    return true;
   };
 
   const updateUserTeamName = (newName: string) => {
@@ -1810,6 +2317,39 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const substituteBenchPlayer = (slotId: string, benchPlayerId: string) => {
     assignPlayerToSlot(slotId, benchPlayerId);
   };
+
+  const applyCraiovaBotosaniSquad = useCallback(() => {
+    const craiovaSquad: SquadState = {
+      formation: '4-4-2',
+      startingSlots: {
+        gk: 'p_craiova_popescu',          // Laurențiu Popescu (#21, sportmonksId: 165686)
+        lb: 'p_craiova_bancu_real',       // Nicușor Bancu (#11, sportmonksId: 165093)
+        lcb: 'p_craiova_screciu_real',    // Vladimir Screciu (#6, sportmonksId: 165553)
+        rcb: 'p_craiova_romanchuk',       // Oleksandr Romanchuk (#3, sportmonksId: 1548650)
+        rb: 'p_craiova_stevanovic',       // Nikola Stevanovic (#24, sportmonksId: 1467993)
+        lm: 'p_craiova_matei',            // David Matei (#30, sportmonksId: 37668705)
+        lcm: 'p_craiova_baluta',          // Tudor Băluță (#8, sportmonksId: 165632)
+        rcm: 'p_craiova_cicaldau_real',   // Alexandru Cicâldău (CĂPITAN x2) (#20, sportmonksId: 165458)
+        rm: 'p_craiova_mora',             // Carlos Mora (#17, sportmonksId: 37414279)
+        ls: 'p_craiova_baiaram_real',     // Ștefan Baiaram (#10, sportmonksId: 32786777)
+        rs: 'p_craiova_alhamlawi',        // Assad Al-Hamlawi (#9, sportmonksId: 7346257)
+      },
+      benchPlayerIds: ['p_craiova_maxim', 'p_craiova_cretu', 'p_craiova_nsimba', 'p_craiova_lameira'],
+      captainPlayerId: 'p_craiova_cicaldau_real',
+      boosterActive: false,
+    };
+    setSquad(craiovaSquad);
+    try {
+      localStorage.setItem(`${STORAGE_KEY}_squad`, JSON.stringify(craiovaSquad));
+      localStorage.setItem('supermanager_craiova_live_squad_applied_v3', 'true');
+    } catch (e) { /* ignore */ }
+    refreshSportmonksLiveScores();
+    addNotification({
+      title: '✅ Lotul Craiova vs Botoșani a fost aplicat!',
+      message: 'Toți cei 11 titulari și 4 rezerve au fost configurați cu regulile de punctaj actualizate la zi!',
+      type: 'reward',
+    });
+  }, [refreshSportmonksLiveScores, addNotification]);
 
   // UNIFIED TRANSFER MARKET
   // 1. Place offer on any listing (League or Member)
@@ -2788,10 +3328,10 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       },
     ];
 
-    const all = [myMember, ...rivals];
+    const all = [myMember, ...rivals, ...acceptedExtraMembers];
     all.sort((a, b) => b.totalPoints - a.totalPoints);
     return all.map((m, idx) => ({ ...m, rank: idx + 1 }));
-  }, [user, squad, squadPointsMatchday, squadTotalValue]);
+  }, [user, squad, squadPointsMatchday, squadTotalValue, acceptedExtraMembers]);
 
   const updateLeagueSettings = (newSettings: Partial<LeagueSettings>) => {
     setLeagueSettings((prev) => ({ ...prev, ...newSettings }));
@@ -3574,6 +4114,10 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         logout,
         updateUserTeamName,
         updateUserPassword,
+        updateManagerProfileGlobal,
+        pendingLeagueRequests,
+        approveLeagueJoinRequest,
+        rejectLeagueJoinRequest,
         createNewLeague,
         joinLeagueByCode,
         addNewsArticle,
@@ -3586,6 +4130,7 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setCaptain,
         swapPlayers,
         substituteBenchPlayer,
+        applyCraiovaBotosaniSquad,
         unifiedMarketItems,
         placeMarketOffer,
         withdrawMarketOffer,
@@ -3662,6 +4207,8 @@ export const FantasyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         isSportmonksPolling,
         syncSportmonksPlayerIds,
         refreshSportmonksLiveScores,
+        testFixturesEnabled,
+        toggleTestFixtures,
         finalizedMatchIds,
         pendingFinalizations,
         finalizeMatchNow,

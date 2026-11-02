@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan de implementare pentru:\n1. Curățarea datelor hardcodate (resetare puncte etapă la 0, scoruri meciuri 0-0, eliminare evenimente mock) pentru testare pe date reale.\n2. Fereastră modală de confirmare la finalul Meciului Demo (Salvează în Firestore vs. Anulează / Resetare Test).\n3. Eliminarea fluxului global de evenimente stil livescore din antetul meciului demo și direcționarea evenimentelor exclusiv către fotbaliștii titulari ai echipei, accesibile prin click pe fiecare fotbalist în parte.",
-  "updatedAt":  "2026-10-30T15:09:59.892003242Z",
-  "requestFeedback":  true,
-  "userFacing":  true
+  "summary": "Plan de implementare pentru sistemul modern de autentificare (Firebase Auth real Google/Apple + Email/Parolă securizat cu Firestore), editarea profilului de manager din Creator OS cu sincronizare în fundal, încărcarea automată a ligii active la logare și sistem de cereri de aderare la ligă cu aprobarea administratorului înainte de alocarea lotului de start.",
+  "updatedAt": "2026-11-02T14:06:39.485924448Z",
+  "requestFeedback": true,
+  "userFacing": true
 }

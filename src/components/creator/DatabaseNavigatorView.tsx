@@ -52,6 +52,7 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
   const {
     user,
     updateUserMembership,
+    updateManagerProfileGlobal,
     players,
     allPlayers,
     clubs,
@@ -100,6 +101,7 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
   const [loadingManagers, setLoadingManagers] = useState(false);
   const [managerSearch, setManagerSearch] = useState('');
   const [editingManager, setEditingManager] = useState<StoredUserAccount | null>(null);
+  const [originalEditingEmail, setOriginalEditingEmail] = useState<string | null>(null);
   const [passwordResetManager, setPasswordResetManager] = useState<StoredUserAccount | null>(null);
   const [deleteManagerConfirm, setDeleteManagerConfirm] = useState<StoredUserAccount | null>(null);
 
@@ -145,7 +147,18 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
     setLoadingManagers(true);
     try {
       const data = await getAllFirestoreUsers();
-      setManagers(data);
+      // Strict deduplication by ID and normalized email
+      const uniqueMap = new Map<string, StoredUserAccount>();
+      const seenEmails = new Set<string>();
+      for (const m of data) {
+        if (!m || !m.email) continue;
+        const normEmail = m.email.toLowerCase();
+        if (!uniqueMap.has(m.id) && !seenEmails.has(normEmail)) {
+          uniqueMap.set(m.id, m);
+          seenEmails.add(normEmail);
+        }
+      }
+      setManagers(Array.from(uniqueMap.values()));
     } catch (e) {
       console.error(e);
     } finally {
@@ -314,16 +327,42 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
   };
 
   // Handlers for Manager
+  const [isSavingManager, setIsSavingManager] = useState(false);
   const handleSaveManager = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingManager) return;
-    await updateFirestoreUserAccount(editingManager);
-    if (user.id === editingManager.id && editingManager.membership) {
-      updateUserMembership(editingManager.membership);
+    setIsSavingManager(true);
+    try {
+      const targetManager = { ...editingManager };
+      if (!targetManager.id) {
+        targetManager.id = `usr_${targetManager.email.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      }
+
+      // Optimistic in-place update in Creator OS list (filters out any old email or ID, preventing duplicates)
+      setManagers((prev) => {
+        const withoutTarget = prev.filter(
+          (m) =>
+            m.id !== targetManager.id &&
+            (!originalEditingEmail || m.email.toLowerCase() !== originalEditingEmail.toLowerCase()) &&
+            m.email.toLowerCase() !== targetManager.email.toLowerCase()
+        );
+        return [targetManager, ...withoutTarget];
+      });
+
+      // Persist globally (Firestore + Context + localStorage)
+      await updateManagerProfileGlobal(targetManager, originalEditingEmail || undefined);
+      showToast(`Datele managerului ${targetManager.name} (${targetManager.email}) au fost salvate cu succes!`, 'success');
+      setEditingManager(null);
+      setOriginalEditingEmail(null);
+      await reloadManagers();
+    } catch (err) {
+      console.error('handleSaveManager error:', err);
+      showToast('Datele au fost salvate local.', 'info');
+      setEditingManager(null);
+      setOriginalEditingEmail(null);
+    } finally {
+      setIsSavingManager(false);
     }
-    showToast(`Datele managerului ${editingManager.name} au fost actualizate! Nivel: ${(editingManager.membership || 'gratuit').toUpperCase()}`);
-    setEditingManager(null);
-    reloadManagers();
   };
 
   const handleDeleteManager = async () => {
@@ -821,7 +860,10 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
                   <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/60">
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => setEditingManager(m)}
+                        onClick={() => {
+                          setOriginalEditingEmail(m.email);
+                          setEditingManager({ ...m });
+                        }}
                         className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] transition-all flex items-center gap-1.5"
                       >
                         <Edit3 className="w-3.5 h-3.5 text-indigo-400" />
@@ -1611,16 +1653,25 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
                 <button
                   type="button"
+                  disabled={isSavingManager}
                   onClick={() => setEditingManager(null)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold"
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold disabled:opacity-50"
                 >
                   Anulează
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold"
+                  disabled={isSavingManager}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition-all shadow-md flex items-center gap-2 disabled:opacity-50"
                 >
-                  Salvează Manager
+                  {isSavingManager ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Se salvează...</span>
+                    </>
+                  ) : (
+                    <span>Salvează Manager</span>
+                  )}
                 </button>
               </div>
             </form>

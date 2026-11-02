@@ -88,10 +88,18 @@ export class MatchFinalizerService {
 
     console.log(`[MatchFinalizer] Inițiere salvare definitivă FT pentru meciul #${fixtureKey}...`);
 
-    // Jucătorii celor 2 echipe
-    const matchPlayers = allPlayers.filter(
-      (p) => p.clubId === params.homeClubId || p.clubId === params.awayClubId
-    );
+    // Jucătorii celor 2 echipe (suport flexibil pentru id-uri cu sau fără prefixul 'c_')
+    const normHome = params.homeClubId.replace(/^c_/, '');
+    const normAway = params.awayClubId.replace(/^c_/, '');
+    const matchPlayers = allPlayers.filter((p) => {
+      const pClubNorm = (p.clubId || '').replace(/^c_/, '');
+      return (
+        p.clubId === params.homeClubId ||
+        p.clubId === params.awayClubId ||
+        pClubNorm === normHome ||
+        pClubNorm === normAway
+      );
+    });
 
     if (matchPlayers.length === 0) {
       return {
@@ -188,11 +196,23 @@ export class MatchFinalizerService {
         events: liveData.events || [],
       };
 
-      // 5. Operație în WriteBatch Firestore
       const playerRef = doc(db, 'all_players', player.id);
+      const customPlayerRef = doc(db, 'custom_players', player.id);
       const updatePayload: any = {
+        id: player.id,
+        name: player.name,
+        firstName: player.firstName || '',
+        lastName: player.lastName || '',
+        clubId: player.clubId,
+        position: player.position,
+        number: player.number || 10,
+        marketValue: player.marketValue || 500000,
+        sportmonksId: player.sportmonksId,
+        avatar: player.avatar,
+        nationality: player.nationality || 'România',
         totalSeasonPoints: increment(totalFinalPoints),
         pointsTotal: increment(totalFinalPoints),
+        pointsMatchday: totalFinalPoints,
         matchesPlayed: increment(minutesPlayed > 0 ? 1 : 0),
         lastMatchPoints: totalFinalPoints,
         lastMatchDetails: newLastMatchDetails,
@@ -204,6 +224,7 @@ export class MatchFinalizerService {
       }
 
       batch.set(playerRef, updatePayload, { merge: true });
+      batch.set(customPlayerRef, updatePayload, { merge: true });
 
       // Salvează și snapshot în gameweek_results
       const gwScoreRef = doc(

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useFantasy } from '../../context/FantasyContext';
 import { StarterSquadRevealView } from '../onboarding/StarterSquadRevealView';
 import { generateRandomStarterSquad } from '../../data/superligaAll16ClubsPlayers';
+import { findFirestoreUser } from '../../lib/firebase';
 import {
   Shield,
   Trophy,
@@ -17,6 +18,8 @@ import {
   Search,
   ExternalLink,
   Coins,
+  Clock,
+  RefreshCw,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -144,11 +147,35 @@ export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps>
   };
 
   // Handle Social Providers
+  const [isSocialLoading, setIsSocialLoading] = useState(false);
   const handleSocialAuth = async (provider: 'google' | 'apple') => {
     setAuthError(null);
-    loginWithProvider(provider);
-    confetti({ particleCount: 40, spread: 70, origin: { y: 0.6 } });
-    setStep(2);
+    setIsSocialLoading(true);
+    try {
+      const res = await loginWithProvider(provider);
+      if (res.success) {
+        confetti({ particleCount: 40, spread: 70, origin: { y: 0.6 } });
+        if (res.isCreator) {
+          if (onCreatorLogin) {
+            onCreatorLogin();
+          } else {
+            onComplete();
+          }
+          return;
+        }
+        if (res.hasLeague) {
+          onComplete();
+        } else {
+          setStep(2);
+        }
+      } else {
+        setAuthError(res.message || 'Eroare la autentificarea cu furnizorul selectat.');
+      }
+    } catch {
+      setAuthError('Eroare neașteptată la autentificare.');
+    } finally {
+      setIsSocialLoading(false);
+    }
   };
 
   // Handle Step 2 League submit
@@ -180,10 +207,34 @@ export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps>
       const res = await joinLeagueByCode(joinLeagueCodeInput.trim());
       if (res.success) {
         confetti({ particleCount: 60, spread: 80, origin: { y: 0.6 } });
-        setStep(3);
+        if (!res.isPendingApproval) {
+          setStep(3);
+        }
       } else {
         setLeagueError(res.message);
       }
+    }
+  };
+
+  const [isCheckingApproval, setIsCheckingApproval] = useState(false);
+  const handleCheckApproval = async () => {
+    setIsCheckingApproval(true);
+    try {
+      const liveUser = await findFirestoreUser(user.email);
+      if (liveUser && liveUser.leagueStatus === 'active') {
+        confetti({ particleCount: 50, spread: 70, origin: { y: 0.6 } });
+        if (!liveUser.starterPackClaimed) {
+          setStep(4);
+        } else {
+          onComplete();
+        }
+      } else {
+        alert('Cererea ta este încă în analiză. Administratorul ligii a fost notificat și te va accepta în curând.');
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsCheckingApproval(false);
     }
   };
 
@@ -385,21 +436,40 @@ export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps>
               </div>
 
               {authMode === 'login' && (
-                <div className="p-2.5 bg-indigo-950/40 border border-indigo-500/30 rounded-xl flex items-center justify-between gap-2 text-[11px]">
-                  <div>
-                    <span className="font-bold text-indigo-300 block">Creator &amp; Commissioner OS</span>
-                    <span className="text-slate-400 font-mono text-[10px]">creator@supermanager.ro • 1923</span>
+                <div className="space-y-2">
+                  <div className="p-2.5 bg-indigo-950/40 border border-indigo-500/30 rounded-xl flex items-center justify-between gap-2 text-[11px]">
+                    <div>
+                      <span className="font-bold text-indigo-300 block">Creator &amp; Commissioner OS</span>
+                      <span className="text-slate-400 font-mono text-[10px]">creator@supermanager.ro • 1923</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmail('creator@supermanager.ro');
+                        setPassword('1923');
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 font-bold text-[10px] border border-indigo-500/40 shrink-0"
+                    >
+                      Completează
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEmail('creator@supermanager.ro');
-                      setPassword('1923');
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 font-bold text-[10px] border border-indigo-500/40 shrink-0"
-                  >
-                    Completează
-                  </button>
+
+                  <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl flex items-center justify-between gap-2 text-[11px]">
+                    <div>
+                      <span className="font-bold text-emerald-300 block">Manager Superliga</span>
+                      <span className="text-slate-400 font-mono text-[10px]">alex.manager@superliga.ro • manager123</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmail('alex.manager@superliga.ro');
+                        setPassword('manager123');
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-bold text-[10px] border border-emerald-500/40 shrink-0"
+                    >
+                      Completează
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -422,6 +492,64 @@ export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps>
 
         {/* ================= STEP 2: CREATE OR JOIN LEAGUE ================= */}
         {step === 2 && (
+          user.leagueStatus === 'pending_approval' ? (
+            <div className="bg-slate-900/90 border border-amber-500/30 rounded-3xl p-6 shadow-2xl space-y-4 text-center">
+              <div className="inline-flex p-3 rounded-2xl bg-amber-500/20 text-amber-400 mx-auto">
+                <Clock className="w-8 h-8 animate-pulse" />
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-amber-400">
+                  Cerere de Aderare Trimisă
+                </span>
+                <h2 className="text-xl font-black text-white">
+                  În Așteptarea Aprobării Adminului
+                </h2>
+                <p className="text-xs text-slate-300 max-w-sm mx-auto leading-relaxed">
+                  Cererea ta de înscriere în liga cu codul <span className="font-mono font-bold text-amber-300">{user.leagueCode || 'SUPER2026'}</span> a fost transmisă administratorului ligii. De îndată ce este aprobată în joc, vei primi automat lotul oficial de 14 jucători și acces deplin!
+                </p>
+              </div>
+
+              <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800 text-left text-xs space-y-2">
+                <div className="flex justify-between text-slate-400 text-[11px]">
+                  <span>Manager:</span>
+                  <span className="font-bold text-white">{user.name}</span>
+                </div>
+                <div className="flex justify-between text-slate-400 text-[11px]">
+                  <span>Club:</span>
+                  <span className="font-bold text-white">{user.teamName}</span>
+                </div>
+                <div className="flex justify-between text-slate-400 text-[11px]">
+                  <span>Stare cerere:</span>
+                  <span className="font-bold text-amber-400 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                    În evaluare de către admin
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleCheckApproval}
+                  disabled={isCheckingApproval}
+                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isCheckingApproval ? 'animate-spin' : ''}`} />
+                  <span>{isCheckingApproval ? 'Se verifică baza de date...' : 'Verifică Stare Aprobare'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLeagueMode('join');
+                  }}
+                  className="w-full py-2 text-xs text-slate-400 hover:text-white transition-colors"
+                >
+                  Introdu alt cod de ligă
+                </button>
+              </div>
+            </div>
+          ) : (
           <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4">
             <div className="text-center space-y-1">
               <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400">
@@ -565,6 +693,7 @@ export const GameAuthAndOnboardingFlow: React.FC<GameAuthAndOnboardingFlowProps>
               </button>
             </form>
           </div>
+          )
         )}
 
         {/* ================= STEP 3: INVITE FRIENDS VIA LINK OR CODE ================= */}

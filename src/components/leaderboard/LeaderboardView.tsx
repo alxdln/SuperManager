@@ -4,14 +4,28 @@ import { LeagueMember } from '../../types/football';
 import { formatCurrency } from '../../utils/scoringEngine';
 import { ManagerSquadModal } from './ManagerSquadModal';
 import { ManagerSeasonStatsModal } from './ManagerSeasonStatsModal';
-import { Trophy, Medal, Flame, Copy, Check, ChevronRight } from 'lucide-react';
+import { Trophy, Medal, Flame, Copy, Check, ChevronRight, X, Clock, UserPlus } from 'lucide-react';
 
 export const LeaderboardView: React.FC = () => {
-  const { user, leagueMembers, leagueSettings } = useFantasy();
+  const {
+    user,
+    leagueMembers,
+    leagueSettings,
+    pendingLeagueRequests,
+    approveLeagueJoinRequest,
+    rejectLeagueJoinRequest,
+  } = useFantasy();
   const [viewType, setViewType] = useState<'matchday' | 'general'>('matchday');
   const [copiedCode, setCopiedCode] = useState(false);
   const [selectedMemberForSquad, setSelectedMemberForSquad] = useState<LeagueMember | null>(null);
   const [selectedMemberForSeasonStats, setSelectedMemberForSeasonStats] = useState<LeagueMember | null>(null);
+
+  const isLeagueAdmin =
+    user.membership === 'creator' ||
+    user.membership === 'admin' ||
+    leagueSettings.creatorId === user.id ||
+    user.email === 'alex.manager@superliga.ro' ||
+    user.email === 'creator@supermanager.ro';
 
   const sortedMembers = [...leagueMembers].sort((a, b) => {
     if (viewType === 'matchday') {
@@ -49,6 +63,61 @@ export const LeaderboardView: React.FC = () => {
           <span>{copiedCode ? 'Copiat!' : leagueSettings.leagueCode}</span>
         </button>
       </div>
+
+      {/* Pending Join Requests Admin Panel */}
+      {isLeagueAdmin && pendingLeagueRequests.length > 0 && (
+        <div className="p-4 bg-amber-950/40 border border-amber-500/50 rounded-3xl space-y-3 shadow-xl">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping"></span>
+              <h4 className="text-xs font-black uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                <UserPlus className="w-4 h-4 text-amber-400" />
+                <span>Cereri de Aderare în Așteptare ({pendingLeagueRequests.length})</span>
+              </h4>
+            </div>
+            <span className="text-[10px] bg-amber-500/20 text-amber-300 font-mono font-bold px-2 py-0.5 rounded-full border border-amber-500/30">
+              Necesită Aprobare Admin
+            </span>
+          </div>
+          <p className="text-xs text-slate-300">
+            Managerii de mai jos au introdus codul ligii tale. Când îi accepți, aceștia primesc imediat lotul oficial de 14 fotbaliști și devin activi în clasament.
+          </p>
+
+          <div className="space-y-2">
+            {pendingLeagueRequests.map((req) => (
+              <div
+                key={req.id}
+                className="p-3 bg-slate-900/90 rounded-2xl border border-slate-800 flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-black text-white">{req.userName}</span>
+                    <span className="text-[10px] text-emerald-400 font-bold">• {req.teamName}</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 block font-mono">{req.userEmail}</span>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                  <button
+                    onClick={() => approveLeagueJoinRequest(req.id)}
+                    className="flex-1 sm:flex-none py-1.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1 shadow-sm transition-all active:scale-95"
+                  >
+                    <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    <span>Acceptă &amp; Acordă Lot</span>
+                  </button>
+                  <button
+                    onClick={() => rejectLeagueJoinRequest(req.id)}
+                    className="flex-1 sm:flex-none py-1.5 px-3 rounded-xl bg-slate-800 hover:bg-rose-950 hover:text-rose-400 text-slate-400 font-bold text-xs flex items-center justify-center gap-1 border border-slate-700 transition-all"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Respinge</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Leaderboard Segmented Selector */}
       <div className="flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-2xl">

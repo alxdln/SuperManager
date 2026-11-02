@@ -244,7 +244,9 @@ export type MatchEventType =
   | 'match_lost'
   | 'match_draw'
   | 'minutes_bonus'
-  | 'recovery';
+  | 'recovery'
+  | 'team_goal_scored'
+  | 'team_goal_conceded';
 
 export interface MatchLiveEvent {
   id: string;
@@ -324,6 +326,7 @@ export type UserMembership = 'gratuit' | 'pro' | 'admin' | 'creator';
 export interface LeagueSettings {
   leagueName: string;
   leagueCode: string;
+  creatorId?: string;
   startingBudget: number;
   maxSquadSize: number;
   maxSameClubPlayers?: number;
@@ -351,7 +354,10 @@ export interface UserProfile {
   fanCoins: number;
   checkinsCount: number;
   leagueId?: string;
+  leagueCode?: string;
+  leagueStatus?: 'none' | 'pending_approval' | 'active';
   starterPackClaimed?: boolean;
   membership?: UserMembership;
 }
+
 

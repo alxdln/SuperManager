@@ -115,12 +115,49 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
     setTimeout(() => setStatusMessage(null), 3000);
   };
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginEmail.trim() || !loginPass.trim()) return;
-    login(loginEmail, loginPass);
-    setStatusMessage('Autentificat cu succes!');
-    setTimeout(() => setStatusMessage(null), 3000);
+    setIsLoggingIn(true);
+    setStatusMessage('Se verifică autentificarea...');
+    try {
+      const res = await login(loginEmail.trim(), loginPass.trim());
+      if (res.success) {
+        setStatusMessage('Autentificat cu succes în contul tău!');
+        setTimeout(() => {
+          setStatusMessage(null);
+          onClose();
+        }, 1200);
+      } else {
+        setStatusMessage(res.message || 'Date de conectare incorecte.');
+      }
+    } catch {
+      setStatusMessage('Eroare neașteptată la autentificare.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleSocialLogin = async (provider: 'google' | 'apple') => {
+    setIsLoggingIn(true);
+    setStatusMessage(`Conectare cu ${provider === 'google' ? 'Google' : 'Apple'}...`);
+    try {
+      const res = await loginWithProvider(provider);
+      if (res.success) {
+        setStatusMessage('Conectat cu succes!');
+        setTimeout(() => {
+          setStatusMessage(null);
+          onClose();
+        }, 1200);
+      } else {
+        setStatusMessage(res.message || 'Eroare la autentificare.');
+      }
+    } catch {
+      setStatusMessage('Eroare neașteptată.');
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
   return (
@@ -472,16 +509,20 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
 
             <div className="space-y-2">
               <button
-                onClick={() => loginWithProvider('apple')}
-                className="w-full py-2.5 px-4 rounded-xl bg-white text-slate-950 font-bold flex items-center justify-center gap-2 hover:bg-slate-100 transition-colors shadow-sm"
+                type="button"
+                disabled={isLoggingIn}
+                onClick={() => handleSocialLogin('apple')}
+                className="w-full py-2.5 px-4 rounded-xl bg-white text-slate-950 font-bold flex items-center justify-center gap-2 hover:bg-slate-100 transition-colors shadow-sm disabled:opacity-50"
               >
                 <Apple className="w-4 h-4 fill-current" />
                 <span>Continuă cu Apple ID</span>
               </button>
 
               <button
-                onClick={() => loginWithProvider('google')}
-                className="w-full py-2.5 px-4 rounded-xl bg-slate-800 text-white border border-slate-700 font-bold flex items-center justify-center gap-2 hover:bg-slate-700 transition-colors"
+                type="button"
+                disabled={isLoggingIn}
+                onClick={() => handleSocialLogin('google')}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-800 text-white border border-slate-700 font-bold flex items-center justify-center gap-2 hover:bg-slate-700 transition-colors disabled:opacity-50"
               >
                 <Globe className="w-4 h-4 text-rose-400" />
                 <span>Continuă cu Google</span>
@@ -515,11 +556,35 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
                 required
               />
 
+              <div className="flex gap-2 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginEmail('alex.manager@superliga.ro');
+                    setLoginPass('manager123');
+                  }}
+                  className="flex-1 py-1 px-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 font-bold text-[10px] border border-emerald-500/30 truncate"
+                >
+                  alex.manager
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginEmail('creator@supermanager.ro');
+                    setLoginPass('1923');
+                  }}
+                  className="flex-1 py-1 px-2 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 font-bold text-[10px] border border-indigo-500/30 truncate"
+                >
+                  creator OS
+                </button>
+              </div>
+
               <button
                 type="submit"
-                className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-all shadow-md"
+                disabled={isLoggingIn}
+                className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-all shadow-md disabled:opacity-50"
               >
-                Intră în Cont
+                {isLoggingIn ? 'Se procesează...' : 'Intră în Cont'}
               </button>
             </form>
 

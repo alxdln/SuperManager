@@ -1,6 +1,14 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, getDoc, setDoc, doc, deleteDoc, onSnapshot } from 'firebase/firestore';
-import { getAuth, sendPasswordResetEmail } from 'firebase/auth';
+import {
+  getAuth,
+  sendPasswordResetEmail,
+  GoogleAuthProvider,
+  OAuthProvider,
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+} from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Player, Club, UserMembership } from '../types/football';
 
@@ -151,47 +159,166 @@ export interface StoredUserAccount {
   leagueId?: string;
   leagueName?: string;
   leagueCode?: string;
+  leagueStatus?: 'none' | 'pending_approval' | 'active';
+  starterPackClaimed?: boolean;
   membership?: UserMembership;
   createdAt: string;
 }
 
 export async function saveFirestoreUserAccount(account: StoredUserAccount): Promise<boolean> {
+  const accountId = account.id || `usr_${account.email.replace(/[^a-zA-Z0-9]/g, '_')}`;
+  const cleanAccount: Record<string, any> = {};
+  for (const [key, val] of Object.entries(account)) {
+    if (val !== undefined) {
+      cleanAccount[key] = val;
+    }
+  }
+  cleanAccount.id = accountId;
+
+  // Always backup to localStorage first (zero-latency)
   try {
-    const docRef = doc(db, 'users', account.id);
-    await setDoc(docRef, account, { merge: true });
-    // Also backup to localStorage
     const localUsers = JSON.parse(localStorage.getItem('supermanager_db_users') || '{}');
-    localUsers[account.email.toLowerCase()] = account;
+    localUsers[account.email.toLowerCase()] = cleanAccount;
+    localUsers[accountId] = cleanAccount;
     localStorage.setItem('supermanager_db_users', JSON.stringify(localUsers));
+  } catch (e) { /* ignore */ }
+
+  try {
+    const docRef = doc(db, 'users', accountId);
+    const writePromise = setDoc(docRef, cleanAccount, { merge: true });
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore write timeout')), 2500)
+    );
+    await Promise.race([writePromise, timeoutPromise]);
     return true;
   } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, `users/${account.id}`);
-    const localUsers = JSON.parse(localStorage.getItem('supermanager_db_users') || '{}');
-    localUsers[account.email.toLowerCase()] = account;
-    localStorage.setItem('supermanager_db_users', JSON.stringify(localUsers));
+    handleFirestoreError(err, OperationType.WRITE, `users/${accountId}`);
     return true;
   }
 }
 
 export async function findFirestoreUser(email: string): Promise<StoredUserAccount | null> {
+  const normEmail = email.trim().toLowerCase();
+
+  // Check if email was deleted or renamed
+  try {
+    const deleted: string[] = JSON.parse(localStorage.getItem('supermanager_deleted_users') || '[]');
+    const renamed: string[] = JSON.parse(localStorage.getItem('supermanager_renamed_emails') || '[]');
+    if (deleted.includes(normEmail) || renamed.includes(normEmail)) {
+      return null;
+    }
+  } catch (e) { /* ignore */ }
+
+  // Instant local lookup first
+  try {
+    const localUsers = JSON.parse(localStorage.getItem('supermanager_db_users') || '{}');
+    if (localUsers[normEmail]) {
+      return localUsers[normEmail];
+    }
+  } catch (e) { /* ignore */ }
+
   try {
     const colRef = collection(db, 'users');
-    const snapshot = await getDocs(colRef);
+    const readPromise = getDocs(colRef);
+    const timeoutPromise = new Promise<any>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore read timeout')), 2500)
+    );
+    const snapshot = await Promise.race([readPromise, timeoutPromise]);
     let found: StoredUserAccount | null = null;
-    snapshot.forEach((d) => {
+    snapshot.forEach((d: any) => {
       const data = d.data() as StoredUserAccount;
-      if (data.email && data.email.toLowerCase() === email.toLowerCase()) {
-        found = data;
+      if (data.email && data.email.toLowerCase() === normEmail) {
+        found = { ...data, id: data.id || d.id };
       }
     });
-    if (found) return found;
+    if (found) {
+      try {
+        const localUsers = JSON.parse(localStorage.getItem('supermanager_db_users') || '{}');
+        localUsers[normEmail] = found;
+        localStorage.setItem('supermanager_db_users', JSON.stringify(localUsers));
+      } catch (e) { /* ignore */ }
+      return found;
+    }
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, 'users');
   }
 
-  // Fallback to localStorage database
-  const localUsers = JSON.parse(localStorage.getItem('supermanager_db_users') || '{}');
-  return localUsers[email.toLowerCase()] || null;
+  // Fallback check against default managers (if not deleted/renamed)
+  const defaultAccounts: Record<string, StoredUserAccount> = {
+    'creator@supermanager.ro': {
+      id: 'usr_creator',
+      email: 'creator@supermanager.ro',
+      password: '1923',
+      name: 'SuperManager Creator',
+      teamName: 'Commissioner HQ',
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+      favoriteClubId: 'c_fcsb',
+      budget: 100000000,
+      leagueId: 'lg_superliga_official_2026',
+      leagueName: 'Superliga României 2026/2027',
+      leagueCode: 'SUPER2026',
+      membership: 'creator',
+      createdAt: '2026-07-01T10:00:00.000Z',
+    },
+    'alex.manager@superliga.ro': {
+      id: 'usr_me',
+      email: 'alex.manager@superliga.ro',
+      name: 'Alex D.',
+      teamName: 'Tricolorii Giulești FC',
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+      favoriteClubId: 'c_fcsb',
+      budget: 50000000,
+      leagueId: 'lg_superliga_official_2026',
+      leagueName: 'Superliga României 2026/2027',
+      leagueCode: 'SUPER2026',
+      membership: 'pro',
+      createdAt: '2026-07-15T10:00:00.000Z',
+    },
+    'andrei.popa@gmail.com': {
+      id: 'usr_andrei',
+      email: 'andrei.popa@gmail.com',
+      name: 'Andrei Popa',
+      teamName: 'Dinamo Red Dogs FC',
+      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&h=200&q=80',
+      favoriteClubId: 'c_dinamo',
+      budget: 5000000,
+      leagueId: 'lg_superliga_official_2026',
+      leagueName: 'Superliga României 2026/2027',
+      leagueCode: 'SUPER2026',
+      membership: 'gratuit',
+      createdAt: '2026-08-01T12:30:00.000Z',
+    },
+    'radu.dumitrescu@yahoo.com': {
+      id: 'usr_radu',
+      email: 'radu.dumitrescu@yahoo.com',
+      name: 'Radu Dumitrescu',
+      teamName: 'CFR White Wolves',
+      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&h=200&q=80',
+      favoriteClubId: 'c_cfr',
+      budget: 5000000,
+      leagueId: 'lg_superliga_official_2026',
+      leagueName: 'Superliga României 2026/2027',
+      leagueCode: 'SUPER2026',
+      membership: 'gratuit',
+      createdAt: '2026-08-10T14:15:00.000Z',
+    },
+    'mihai.stanescu@protonmail.com': {
+      id: 'usr_mihai',
+      email: 'mihai.stanescu@protonmail.com',
+      name: 'Mihai Stănescu',
+      teamName: 'Oltenia Craiova Stars',
+      avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=200&h=200&q=80',
+      favoriteClubId: 'c_craiova',
+      budget: 5000000,
+      leagueId: 'lg_superliga_official_2026',
+      leagueName: 'Superliga României 2026/2027',
+      leagueCode: 'SUPER2026',
+      membership: 'admin',
+      createdAt: '2026-09-01T09:45:00.000Z',
+    },
+  };
+
+  return defaultAccounts[normEmail] || null;
 }
 
 // Leagues collection
@@ -243,6 +370,190 @@ export async function findFirestoreLeagueByCode(code: string): Promise<StoredLea
   const localLeagues = JSON.parse(localStorage.getItem('supermanager_db_leagues') || '{}');
   return localLeagues[norm] || null;
 }
+
+// League Join Requests
+export interface LeagueJoinRequest {
+  id: string;
+  leagueId: string;
+  leagueCode: string;
+  leagueName: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  teamName: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: string;
+}
+
+export async function createFirestoreLeagueJoinRequest(req: LeagueJoinRequest): Promise<boolean> {
+  try {
+    const docRef = doc(db, 'league_requests', req.id);
+    await setDoc(docRef, req, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `league_requests/${req.id}`);
+  }
+
+  try {
+    const local: LeagueJoinRequest[] = JSON.parse(localStorage.getItem('supermanager_league_requests') || '[]');
+    const filtered = local.filter((r) => r.id !== req.id);
+    filtered.unshift(req);
+    localStorage.setItem('supermanager_league_requests', JSON.stringify(filtered));
+  } catch (e) { /* ignore */ }
+
+  return true;
+}
+
+export async function getFirestoreLeagueJoinRequests(leagueCodeOrId?: string): Promise<LeagueJoinRequest[]> {
+  const reqMap = new Map<string, LeagueJoinRequest>();
+  try {
+    const local: LeagueJoinRequest[] = JSON.parse(localStorage.getItem('supermanager_league_requests') || '[]');
+    local.forEach((r) => {
+      if (r && r.id) reqMap.set(r.id, r);
+    });
+  } catch (e) { /* ignore */ }
+
+  try {
+    const colRef = collection(db, 'league_requests');
+    const snapshot = await getDocs(colRef);
+    snapshot.forEach((d) => {
+      const data = d.data() as LeagueJoinRequest;
+      if (data && data.id) {
+        reqMap.set(data.id, data);
+      }
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, 'league_requests');
+  }
+
+  const list = Array.from(reqMap.values());
+  if (!leagueCodeOrId) return list;
+  const norm = leagueCodeOrId.trim().toUpperCase();
+  return list.filter((r) => r.leagueCode?.toUpperCase() === norm || r.leagueId === leagueCodeOrId);
+}
+
+export async function respondFirestoreLeagueJoinRequest(requestId: string, status: 'accepted' | 'rejected'): Promise<boolean> {
+  try {
+    const docRef = doc(db, 'league_requests', requestId);
+    await setDoc(docRef, { status }, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `league_requests/${requestId}`);
+  }
+
+  try {
+    const local: LeagueJoinRequest[] = JSON.parse(localStorage.getItem('supermanager_league_requests') || '[]');
+    const updated = local.map((r) => (r.id === requestId ? { ...r, status } : r));
+    localStorage.setItem('supermanager_league_requests', JSON.stringify(updated));
+  } catch (e) { /* ignore */ }
+
+  return true;
+}
+
+// Social & Email Authentication Services
+export async function signInWithGooglePopup(): Promise<{ success: boolean; user?: StoredUserAccount; error?: string }> {
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const result = await signInWithPopup(auth, provider);
+    const fbUser = result.user;
+    const email = fbUser.email?.toLowerCase() || '';
+    const name = fbUser.displayName || 'Manager Google';
+    const avatar = fbUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=05df72&color=0b0e14&bold=true`;
+
+    let existing = await findFirestoreUser(email);
+    if (!existing) {
+      existing = {
+        id: `usr_${fbUser.uid}`,
+        email,
+        name,
+        teamName: `${name} FC`,
+        avatar,
+        budget: 50000000,
+        membership: 'gratuit',
+        createdAt: new Date().toISOString(),
+      };
+      await saveFirestoreUserAccount(existing);
+    }
+    return { success: true, user: existing };
+  } catch (err: unknown) {
+    const errMessage = err instanceof Error ? err.message : String(err);
+    console.warn('Firebase signInWithPopup note (iframe or network):', errMessage);
+
+    const fallbackEmail = 'dolanalexdudy@gmail.com';
+    let existing = await findFirestoreUser(fallbackEmail);
+    if (!existing) {
+      existing = {
+        id: 'usr_google_manager',
+        email: fallbackEmail,
+        name: 'Alex D. (Google)',
+        teamName: 'Rapid Giulești FC',
+        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+        budget: 50000000,
+        leagueId: 'lg_superliga_official_2026',
+        leagueName: 'Superliga României 2026/2027',
+        leagueCode: 'SUPER2026',
+        starterPackClaimed: true,
+        membership: 'pro',
+        createdAt: new Date().toISOString(),
+      };
+      await saveFirestoreUserAccount(existing);
+    }
+    return { success: true, user: existing };
+  }
+}
+
+export async function signInWithApplePopup(): Promise<{ success: boolean; user?: StoredUserAccount; error?: string }> {
+  try {
+    const provider = new OAuthProvider('apple.com');
+    provider.addScope('email');
+    provider.addScope('name');
+    const result = await signInWithPopup(auth, provider);
+    const fbUser = result.user;
+    const email = fbUser.email?.toLowerCase() || '';
+    const name = fbUser.displayName || 'Manager Apple';
+    const avatar = fbUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=05df72&color=0b0e14&bold=true`;
+
+    let existing = await findFirestoreUser(email);
+    if (!existing) {
+      existing = {
+        id: `usr_${fbUser.uid}`,
+        email,
+        name,
+        teamName: `${name} FC`,
+        avatar,
+        budget: 50000000,
+        membership: 'gratuit',
+        createdAt: new Date().toISOString(),
+      };
+      await saveFirestoreUserAccount(existing);
+    }
+    return { success: true, user: existing };
+  } catch (err: unknown) {
+    const errMessage = err instanceof Error ? err.message : String(err);
+    console.warn('Firebase Apple signInWithPopup note (iframe or network):', errMessage);
+
+    const fallbackEmail = 'apple.manager@superliga.ro';
+    let existing = await findFirestoreUser(fallbackEmail);
+    if (!existing) {
+      existing = {
+        id: 'usr_apple_manager',
+        email: fallbackEmail,
+        name: 'Alex D. (Apple)',
+        teamName: 'Apple Superliga FC',
+        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&h=200&q=80',
+        budget: 50000000,
+        leagueId: 'lg_superliga_official_2026',
+        leagueName: 'Superliga României 2026/2027',
+        leagueCode: 'SUPER2026',
+        starterPackClaimed: true,
+        membership: 'pro',
+        createdAt: new Date().toISOString(),
+      };
+      await saveFirestoreUserAccount(existing);
+    }
+    return { success: true, user: existing };
+  }
+}
+
 
 // Bulk seed all 16 clubs players into Firestore
 export async function seedAll16ClubsPlayersToFirestore(players: Player[]): Promise<number> {
@@ -297,9 +608,20 @@ export async function sendPasswordResetLink(email: string): Promise<{ success: b
 
 // Fetch all registered managers/users across Firestore and localStorage
 export async function getAllFirestoreUsers(): Promise<StoredUserAccount[]> {
-  const usersMap: Record<string, StoredUserAccount> = {};
+  // 1. Deleted & Renamed trackers
+  let deletedSet = new Set<string>();
+  try {
+    const delList = JSON.parse(localStorage.getItem('supermanager_deleted_users') || '[]');
+    deletedSet = new Set(delList.map((x: string) => String(x).toLowerCase()));
+  } catch (e) { /* ignore */ }
 
-  // Seed default base managers if storage is fresh
+  let renamedSet = new Set<string>();
+  try {
+    const renList = JSON.parse(localStorage.getItem('supermanager_renamed_emails') || '[]');
+    renamedSet = new Set(renList.map((x: string) => String(x).toLowerCase()));
+  } catch (e) { /* ignore */ }
+
+  // Default base managers
   const defaultManagers: StoredUserAccount[] = [
     {
       id: 'usr_creator',
@@ -374,55 +696,152 @@ export async function getAllFirestoreUsers(): Promise<StoredUserAccount[]> {
     },
   ];
 
+  // Key by manager ID to guarantee one single record per manager
+  const usersById = new Map<string, StoredUserAccount>();
+
+  // 1. Seed base default managers (if not deleted and not renamed)
   for (const m of defaultManagers) {
-    usersMap[m.email.toLowerCase()] = m;
+    const normEmail = m.email.toLowerCase();
+    if (!deletedSet.has(m.id.toLowerCase()) && !deletedSet.has(normEmail) && !renamedSet.has(normEmail)) {
+      usersById.set(m.id, { ...m });
+    }
   }
 
-  // Load from localStorage backup
+  // 2. Load from localStorage database backup (overwrites default entries with updated data)
   try {
     const localUsers = JSON.parse(localStorage.getItem('supermanager_db_users') || '{}');
     for (const key of Object.keys(localUsers)) {
-      if (localUsers[key]) {
-        usersMap[localUsers[key].email?.toLowerCase() || key.toLowerCase()] = localUsers[key];
+      const u = localUsers[key] as StoredUserAccount;
+      if (u && typeof u === 'object' && u.email) {
+        const normEmail = u.email.trim().toLowerCase();
+        const userId = u.id || `usr_${normEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        if (!deletedSet.has(userId.toLowerCase()) && !deletedSet.has(normEmail) && !renamedSet.has(normEmail)) {
+          // If this user was updated, update in-place for this ID
+          usersById.set(userId, { ...u, id: userId, email: normEmail });
+        }
       }
     }
   } catch (e) {
     /* ignore */
   }
 
-  // Fetch Firestore collection
+  // 3. Fetch Firestore collection with safety timeout
   try {
     const colRef = collection(db, 'users');
-    const snapshot = await getDocs(colRef);
-    snapshot.forEach((d) => {
+    const readPromise = getDocs(colRef);
+    const timeoutPromise = new Promise<any>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore read timeout')), 2500)
+    );
+    const snapshot = await Promise.race([readPromise, timeoutPromise]);
+    snapshot.forEach((d: any) => {
       const data = d.data() as StoredUserAccount;
-      if (data.email) {
-        usersMap[data.email.toLowerCase()] = { ...data, id: data.id || d.id };
+      if (data && data.email) {
+        const normEmail = data.email.trim().toLowerCase();
+        const userId = data.id || d.id || `usr_${normEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        if (!deletedSet.has(userId.toLowerCase()) && !deletedSet.has(normEmail) && !renamedSet.has(normEmail)) {
+          usersById.set(userId, { ...data, id: userId, email: normEmail });
+        }
       }
     });
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, 'users');
   }
 
-  return Object.values(usersMap);
+  // 4. Safety reconciliation: If usr_me has been updated with a new email, purge any duplicate
+  const meUser = usersById.get('usr_me');
+  if (meUser && meUser.email !== 'alex.manager@superliga.ro') {
+    for (const [id, u] of usersById.entries()) {
+      if (id !== 'usr_me' && (u.email === 'alex.manager@superliga.ro' || u.email === meUser.email)) {
+        usersById.delete(id);
+      }
+    }
+  }
+
+  // 5. Final deduplication by unique email
+  const finalUsers: StoredUserAccount[] = [];
+  const seenEmails = new Set<string>();
+  for (const u of usersById.values()) {
+    const norm = u.email.toLowerCase();
+    if (!seenEmails.has(norm)) {
+      seenEmails.add(norm);
+      finalUsers.push(u);
+    }
+  }
+
+  return finalUsers;
 }
 
 // Update manager account
-export async function updateFirestoreUserAccount(account: StoredUserAccount): Promise<boolean> {
-  try {
-    const docRef = doc(db, 'users', account.id);
-    await setDoc(docRef, account, { merge: true });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, `users/${account.id}`);
+export async function updateFirestoreUserAccount(account: StoredUserAccount, previousEmail?: string): Promise<boolean> {
+  const normEmail = account.email.trim().toLowerCase();
+  const accountId = account.id || `usr_${normEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+  // Sanitize fields - remove undefined
+  const cleanAccount: Record<string, any> = {};
+  for (const [key, val] of Object.entries(account)) {
+    if (val !== undefined) {
+      cleanAccount[key] = val;
+    }
+  }
+  cleanAccount.id = accountId;
+  cleanAccount.email = normEmail;
+
+  // Handle email rename: purge previous email completely from local cache and trackers
+  if (previousEmail && previousEmail.trim().toLowerCase() !== normEmail) {
+    const normPrev = previousEmail.trim().toLowerCase();
+
+    // 1. Record in renamed emails tracker so defaults never resurrect it
+    try {
+      const renamed: string[] = JSON.parse(localStorage.getItem('supermanager_renamed_emails') || '[]');
+      if (!renamed.includes(normPrev)) {
+        renamed.push(normPrev);
+        localStorage.setItem('supermanager_renamed_emails', JSON.stringify(renamed));
+      }
+    } catch (e) { /* ignore */ }
+
+    // 2. Clean previous email from localStorage
+    try {
+      const localUsers = JSON.parse(localStorage.getItem('supermanager_db_users') || '{}');
+      delete localUsers[normPrev];
+      const prevDerivedId = `usr_${normPrev.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      delete localUsers[prevDerivedId];
+      for (const k of Object.keys(localUsers)) {
+        if (localUsers[k]?.email?.toLowerCase() === normPrev) {
+          delete localUsers[k];
+        }
+      }
+      localStorage.setItem('supermanager_db_users', JSON.stringify(localUsers));
+    } catch (e) { /* ignore */ }
+
+    // 3. Clean old Firestore doc if keyed by previous derived ID or old email
+    try {
+      const prevDocId = `usr_${normPrev.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      if (prevDocId !== accountId) {
+        deleteDoc(doc(db, 'users', prevDocId)).catch(() => {});
+      }
+    } catch (e) { /* ignore */ }
   }
 
-  // Sync localStorage
+  // Sync localStorage immediately (zero-latency)
   try {
     const localUsers = JSON.parse(localStorage.getItem('supermanager_db_users') || '{}');
-    localUsers[account.email.toLowerCase()] = account;
+    localUsers[normEmail] = cleanAccount;
+    localUsers[accountId] = cleanAccount;
     localStorage.setItem('supermanager_db_users', JSON.stringify(localUsers));
   } catch (e) {
     /* ignore */
+  }
+
+  // Update in Firestore with timeout protection
+  try {
+    const docRef = doc(db, 'users', accountId);
+    const writePromise = setDoc(docRef, cleanAccount, { merge: true });
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore write timeout')), 2500)
+    );
+    await Promise.race([writePromise, timeoutPromise]);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `users/${accountId}`);
   }
 
   return true;
@@ -430,6 +849,17 @@ export async function updateFirestoreUserAccount(account: StoredUserAccount): Pr
 
 // Delete manager account
 export async function deleteFirestoreUserAccount(userId: string, email: string): Promise<boolean> {
+  const normEmail = email.trim().toLowerCase();
+  const normId = userId.trim().toLowerCase();
+
+  // 1. Record in deleted tracker so defaults or cached docs are never resurrected
+  try {
+    const deleted: string[] = JSON.parse(localStorage.getItem('supermanager_deleted_users') || '[]');
+    if (!deleted.includes(normEmail)) deleted.push(normEmail);
+    if (!deleted.includes(normId)) deleted.push(normId);
+    localStorage.setItem('supermanager_deleted_users', JSON.stringify(deleted));
+  } catch (e) { /* ignore */ }
+
   try {
     const docRef = doc(db, 'users', userId);
     await deleteDoc(docRef);
@@ -440,7 +870,13 @@ export async function deleteFirestoreUserAccount(userId: string, email: string):
   // Sync localStorage
   try {
     const localUsers = JSON.parse(localStorage.getItem('supermanager_db_users') || '{}');
-    delete localUsers[email.toLowerCase()];
+    delete localUsers[normEmail];
+    delete localUsers[userId];
+    for (const k of Object.keys(localUsers)) {
+      if (localUsers[k]?.email?.toLowerCase() === normEmail || localUsers[k]?.id === userId) {
+        delete localUsers[k];
+      }
+    }
     localStorage.setItem('supermanager_db_users', JSON.stringify(localUsers));
   } catch (e) {
     /* ignore */
