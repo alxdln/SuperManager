@@ -65,71 +65,82 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({ onClos
   // Filter for player manager tab
   const [filterClub, setFilterClub] = useState<string>('ALL');
 
-  const handleCreatePlayer = (e: React.FormEvent) => {
+  // Action loading states
+  const [isCreatingPlayer, setIsCreatingPlayer] = useState(false);
+  const [isSavingLeagueSettings, setIsSavingLeagueSettings] = useState(false);
+
+  const handleCreatePlayer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!firstName.trim() || !lastName.trim()) {
       alert('Te rugăm să introduci numele și prenumele jucătorului.');
       return;
     }
 
-    const defaultAvatar = avatarUrl.trim()
-      ? avatarUrl.trim()
-      : `https://ui-avatars.com/api/?name=${encodeURIComponent(firstName + ' ' + lastName)}&background=0f172a&color=05df72&bold=true`;
+    setIsCreatingPlayer(true);
+    try {
+      const defaultAvatar = avatarUrl.trim()
+        ? avatarUrl.trim()
+        : `https://ui-avatars.com/api/?name=${encodeURIComponent(firstName + ' ' + lastName)}&background=0f172a&color=05df72&bold=true`;
 
-    addNewPlayer({
-      name: `${firstName} ${lastName}`,
-      firstName,
-      lastName,
-      clubId,
-      position,
-      number,
-      marketValue,
-      avatar: defaultAvatar,
-      nationality,
-      age,
-      status: 'active',
-      stats: {
-        matches: 0,
-        goals: 0,
-        assists: 0,
-        shotsOnTarget: 0,
-        shotsMissed: 0,
-        passesCompleted: 0,
-        keyPasses: 0,
-        crossesCompleted: 0,
-        tacklesWon: 0,
-        recoveries: 0,
-        dribblesCompleted: 0,
-        ballsLost: 0,
-        foulsCommitted: 0,
-        foulsDrawn: 0,
-        yellowCards: 0,
-        redCards: 0,
-        cleanSheets: 0,
-        penaltySaves: 0,
-        goalsConceded: 0,
-      },
-    });
+      await addNewPlayer({
+        name: `${firstName} ${lastName}`,
+        firstName,
+        lastName,
+        clubId,
+        position,
+        number,
+        marketValue,
+        avatar: defaultAvatar,
+        nationality,
+        age,
+        status: 'active',
+        stats: {
+          matches: 0,
+          goals: 0,
+          assists: 0,
+          shotsOnTarget: 0,
+          shotsMissed: 0,
+          passesCompleted: 0,
+          keyPasses: 0,
+          crossesCompleted: 0,
+          tacklesWon: 0,
+          recoveries: 0,
+          dribblesCompleted: 0,
+          ballsLost: 0,
+          foulsCommitted: 0,
+          foulsDrawn: 0,
+          yellowCards: 0,
+          redCards: 0,
+          cleanSheets: 0,
+          penaltySaves: 0,
+          goalsConceded: 0,
+        },
+      });
 
-    setSuccessMsg(`Jucătorul ${firstName} ${lastName} a fost adăugat oficial și listat pe piața transferurilor!`);
-    confetti({ particleCount: 40, spread: 60 });
-
-    // Reset form
-    setFirstName('');
-    setLastName('');
-    setAvatarUrl('');
-    setTimeout(() => setSuccessMsg(''), 4000);
+      confetti({ particleCount: 40, spread: 60 });
+      onClose();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsCreatingPlayer(false);
+    }
   };
 
-  const handleSaveLeagueSettings = (e: React.FormEvent) => {
+  const handleSaveLeagueSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateLeagueSettings({
-      leagueName,
-      startingBudget,
-      maxSquadSize,
-    });
-    setSuccessMsg('Setările ligii au fost salvate cu succes!');
-    setTimeout(() => setSuccessMsg(''), 4000);
+    setIsSavingLeagueSettings(true);
+    try {
+      await updateLeagueSettings({
+        leagueName,
+        startingBudget,
+        maxSquadSize,
+      });
+      onClose();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSavingLeagueSettings(false);
+    }
   };
 
   const displayedPlayers = players.filter((p) => {
@@ -324,9 +335,14 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({ onClos
 
             <button
               type="submit"
-              className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 mt-4"
+              disabled={isCreatingPlayer}
+              className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Plus className="w-4 h-4" />
+              {isCreatingPlayer ? (
+                <RefreshCw className="w-4 h-4 animate-spin text-current" />
+              ) : (
+                <Plus className="w-4 h-4" />
+              )}
               <span>Înregistrează &amp; Listează pe Piață</span>
             </button>
           </form>
@@ -461,9 +477,11 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({ onClos
 
             <button
               type="submit"
-              className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all mt-4"
+              disabled={isSavingLeagueSettings}
+              className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all mt-4 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Salvează Modificările Ligii
+              {isSavingLeagueSettings && <RefreshCw className="w-4 h-4 animate-spin text-current" />}
+              <span>Salvează Modificările Ligii</span>
             </button>
           </form>
         )}

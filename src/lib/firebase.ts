@@ -28,8 +28,42 @@ export enum OperationType {
   WRITE = 'write',
 }
 
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
+}
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  console.error(`Firestore ${operationType} Error at ${path}:`, error);
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map((provider) => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || [],
+    },
+    operationType,
+    path,
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
 }
 
 // Fetch all custom players from Firestore
@@ -186,13 +220,17 @@ export async function saveFirestoreUserAccount(account: StoredUserAccount): Prom
   try {
     const docRef = doc(db, 'users', accountId);
     const writePromise = setDoc(docRef, cleanAccount, { merge: true });
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Firestore write timeout')), 2500)
+    const timeoutPromise = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), 6000)
     );
     await Promise.race([writePromise, timeoutPromise]);
     return true;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, `users/${accountId}`);
+  } catch (err: any) {
+    if (err?.code === 'permission-denied' || String(err).includes('permission')) {
+      handleFirestoreError(err, OperationType.WRITE, `users/${accountId}`);
+    } else {
+      console.warn('Firestore write notice:', err);
+    }
     return true;
   }
 }
@@ -220,17 +258,19 @@ export async function findFirestoreUser(email: string): Promise<StoredUserAccoun
   try {
     const colRef = collection(db, 'users');
     const readPromise = getDocs(colRef);
-    const timeoutPromise = new Promise<any>((_, reject) =>
-      setTimeout(() => reject(new Error('Firestore read timeout')), 2500)
+    const timeoutPromise = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), 6000)
     );
     const snapshot = await Promise.race([readPromise, timeoutPromise]);
     let found: StoredUserAccount | null = null;
-    snapshot.forEach((d: any) => {
-      const data = d.data() as StoredUserAccount;
-      if (data.email && data.email.toLowerCase() === normEmail) {
-        found = { ...data, id: data.id || d.id };
-      }
-    });
+    if (snapshot) {
+      snapshot.forEach((d: any) => {
+        const data = d.data() as StoredUserAccount;
+        if (data.email && data.email.toLowerCase() === normEmail) {
+          found = { ...data, id: data.id || d.id };
+        }
+      });
+    }
     if (found) {
       try {
         const localUsers = JSON.parse(localStorage.getItem('supermanager_db_users') || '{}');
@@ -239,8 +279,12 @@ export async function findFirestoreUser(email: string): Promise<StoredUserAccoun
       } catch (e) { /* ignore */ }
       return found;
     }
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, 'users');
+  } catch (err: any) {
+    if (err?.code === 'permission-denied' || String(err).includes('permission')) {
+      handleFirestoreError(err, OperationType.LIST, 'users');
+    } else {
+      console.warn('Firestore read notice:', err);
+    }
   }
 
   // Fallback check against default managers (if not deleted/renamed)
@@ -725,26 +769,32 @@ export async function getAllFirestoreUsers(): Promise<StoredUserAccount[]> {
     /* ignore */
   }
 
-  // 3. Fetch Firestore collection with safety timeout
+  // 3. Fetch Firestore collection with safety timeout fallback (resolves null without throwing)
   try {
     const colRef = collection(db, 'users');
     const readPromise = getDocs(colRef);
-    const timeoutPromise = new Promise<any>((_, reject) =>
-      setTimeout(() => reject(new Error('Firestore read timeout')), 2500)
+    const timeoutPromise = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), 6000)
     );
     const snapshot = await Promise.race([readPromise, timeoutPromise]);
-    snapshot.forEach((d: any) => {
-      const data = d.data() as StoredUserAccount;
-      if (data && data.email) {
-        const normEmail = data.email.trim().toLowerCase();
-        const userId = data.id || d.id || `usr_${normEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
-        if (!deletedSet.has(userId.toLowerCase()) && !deletedSet.has(normEmail) && !renamedSet.has(normEmail)) {
-          usersById.set(userId, { ...data, id: userId, email: normEmail });
+    if (snapshot) {
+      snapshot.forEach((d: any) => {
+        const data = d.data() as StoredUserAccount;
+        if (data && data.email) {
+          const normEmail = data.email.trim().toLowerCase();
+          const userId = data.id || d.id || `usr_${normEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+          if (!deletedSet.has(userId.toLowerCase()) && !deletedSet.has(normEmail) && !renamedSet.has(normEmail)) {
+            usersById.set(userId, { ...data, id: userId, email: normEmail });
+          }
         }
-      }
-    });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, 'users');
+      });
+    }
+  } catch (err: any) {
+    if (err?.code === 'permission-denied' || String(err).includes('permission')) {
+      handleFirestoreError(err, OperationType.LIST, 'users');
+    } else {
+      console.warn('Firestore read notice:', err);
+    }
   }
 
   // 4. Safety reconciliation: If usr_me has been updated with a new email, purge any duplicate
@@ -836,12 +886,16 @@ export async function updateFirestoreUserAccount(account: StoredUserAccount, pre
   try {
     const docRef = doc(db, 'users', accountId);
     const writePromise = setDoc(docRef, cleanAccount, { merge: true });
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Firestore write timeout')), 2500)
+    const timeoutPromise = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), 6000)
     );
     await Promise.race([writePromise, timeoutPromise]);
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, `users/${accountId}`);
+  } catch (err: any) {
+    if (err?.code === 'permission-denied' || String(err).includes('permission')) {
+      handleFirestoreError(err, OperationType.WRITE, `users/${accountId}`);
+    } else {
+      console.warn('Firestore write notice:', err);
+    }
   }
 
   return true;
@@ -851,29 +905,30 @@ export async function updateFirestoreUserAccount(account: StoredUserAccount, pre
 export async function deleteFirestoreUserAccount(userId: string, email: string): Promise<boolean> {
   const normEmail = email.trim().toLowerCase();
   const normId = userId.trim().toLowerCase();
+  const derivedId = `usr_${normEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
-  // 1. Record in deleted tracker so defaults or cached docs are never resurrected
+  // 1. Immediately record in deleted tracker so defaults or cached docs are never resurrected
   try {
     const deleted: string[] = JSON.parse(localStorage.getItem('supermanager_deleted_users') || '[]');
     if (!deleted.includes(normEmail)) deleted.push(normEmail);
     if (!deleted.includes(normId)) deleted.push(normId);
+    if (!deleted.includes(derivedId)) deleted.push(derivedId);
     localStorage.setItem('supermanager_deleted_users', JSON.stringify(deleted));
-  } catch (e) { /* ignore */ }
-
-  try {
-    const docRef = doc(db, 'users', userId);
-    await deleteDoc(docRef);
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `users/${userId}`);
+  } catch (e) {
+    /* ignore */
   }
 
-  // Sync localStorage
+  // 2. Immediately clean localStorage database
   try {
     const localUsers = JSON.parse(localStorage.getItem('supermanager_db_users') || '{}');
     delete localUsers[normEmail];
     delete localUsers[userId];
+    delete localUsers[normId];
+    delete localUsers[derivedId];
     for (const k of Object.keys(localUsers)) {
-      if (localUsers[k]?.email?.toLowerCase() === normEmail || localUsers[k]?.id === userId) {
+      const itemEmail = localUsers[k]?.email?.toLowerCase();
+      const itemId = localUsers[k]?.id?.toLowerCase();
+      if (itemEmail === normEmail || itemId === normId || itemId === userId.toLowerCase()) {
         delete localUsers[k];
       }
     }
@@ -882,12 +937,31 @@ export async function deleteFirestoreUserAccount(userId: string, email: string):
     /* ignore */
   }
 
+  // 3. Delete from Firestore with safety timeout (max 2000ms) to prevent hanging UI
+  try {
+    const docRef1 = doc(db, 'users', userId);
+    const del1 = deleteDoc(docRef1).catch(() => {});
+    const del2 = derivedId !== userId ? deleteDoc(doc(db, 'users', derivedId)).catch(() => {}) : Promise.resolve();
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
+    await Promise.race([Promise.all([del1, del2]), timeoutPromise]);
+  } catch (err) {
+    console.warn('Firestore delete user notice:', err);
+  }
+
   return true;
 }
 
 // Fetch all created leagues
 export async function getAllFirestoreLeagues(): Promise<StoredLeagueData[]> {
   const leaguesMap: Record<string, StoredLeagueData> = {};
+
+  let deletedLeagues = new Set<string>();
+  try {
+    const delList = JSON.parse(localStorage.getItem('supermanager_deleted_leagues') || '[]');
+    deletedLeagues = new Set(delList.map((x: string) => String(x).toUpperCase()));
+  } catch (e) {
+    /* ignore */
+  }
 
   // Default official Superliga league
   const defaultLeague: StoredLeagueData = {
@@ -900,32 +974,46 @@ export async function getAllFirestoreLeagues(): Promise<StoredLeagueData[]> {
     creatorName: 'Alex D. (Administrator)',
     createdAt: '2026-07-01T10:00:00.000Z',
   };
-  leaguesMap[defaultLeague.code.toUpperCase()] = defaultLeague;
+  if (!deletedLeagues.has(defaultLeague.code.toUpperCase()) && !deletedLeagues.has(defaultLeague.id.toUpperCase())) {
+    leaguesMap[defaultLeague.code.toUpperCase()] = defaultLeague;
+  }
 
   // LocalStorage leagues
   try {
     const localLeagues = JSON.parse(localStorage.getItem('supermanager_db_leagues') || '{}');
     for (const code of Object.keys(localLeagues)) {
-      if (localLeagues[code]) {
-        leaguesMap[code.toUpperCase()] = localLeagues[code];
+      const l = localLeagues[code];
+      if (l && l.code) {
+        const uCode = l.code.toUpperCase();
+        if (!deletedLeagues.has(uCode) && !deletedLeagues.has(l.id?.toUpperCase())) {
+          leaguesMap[uCode] = l;
+        }
       }
     }
   } catch (e) {
     /* ignore */
   }
 
-  // Firestore leagues
+  // Firestore leagues with timeout protection
   try {
     const colRef = collection(db, 'leagues');
-    const snapshot = await getDocs(colRef);
-    snapshot.forEach((d) => {
-      const data = d.data() as StoredLeagueData;
-      if (data.code) {
-        leaguesMap[data.code.toUpperCase()] = { ...data, id: data.id || d.id };
-      }
-    });
+    const readPromise = getDocs(colRef);
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+    const snapshot = await Promise.race([readPromise, timeoutPromise]);
+    if (snapshot) {
+      snapshot.forEach((d) => {
+        const data = d.data() as StoredLeagueData;
+        if (data.code) {
+          const uCode = data.code.toUpperCase();
+          const lId = (data.id || d.id).toUpperCase();
+          if (!deletedLeagues.has(uCode) && !deletedLeagues.has(lId)) {
+            leaguesMap[uCode] = { ...data, id: data.id || d.id };
+          }
+        }
+      });
+    }
   } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, 'leagues');
+    console.warn('Firestore leagues read notice:', err);
   }
 
   return Object.values(leaguesMap);
@@ -934,13 +1022,6 @@ export async function getAllFirestoreLeagues(): Promise<StoredLeagueData[]> {
 // Update league
 export async function updateFirestoreLeague(league: StoredLeagueData): Promise<boolean> {
   try {
-    const docRef = doc(db, 'leagues', league.id);
-    await setDoc(docRef, league, { merge: true });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, `leagues/${league.id}`);
-  }
-
-  try {
     const localLeagues = JSON.parse(localStorage.getItem('supermanager_db_leagues') || '{}');
     localLeagues[league.code.toUpperCase()] = league;
     localStorage.setItem('supermanager_db_leagues', JSON.stringify(localLeagues));
@@ -948,24 +1029,51 @@ export async function updateFirestoreLeague(league: StoredLeagueData): Promise<b
     /* ignore */
   }
 
+  try {
+    const docRef = doc(db, 'leagues', league.id);
+    const writePromise = setDoc(docRef, league, { merge: true });
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500));
+    await Promise.race([writePromise, timeoutPromise]);
+  } catch (err) {
+    console.warn('Firestore update league notice:', err);
+  }
+
   return true;
 }
 
 // Delete league
 export async function deleteFirestoreLeague(leagueId: string, code: string): Promise<boolean> {
+  const normCode = code.trim().toUpperCase();
+  const normId = leagueId.trim().toUpperCase();
+
+  // 1. Immediately track deleted league
   try {
-    const docRef = doc(db, 'leagues', leagueId);
-    await deleteDoc(docRef);
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `leagues/${leagueId}`);
+    const deletedLeagues: string[] = JSON.parse(localStorage.getItem('supermanager_deleted_leagues') || '[]');
+    if (!deletedLeagues.includes(normCode)) deletedLeagues.push(normCode);
+    if (!deletedLeagues.includes(normId)) deletedLeagues.push(normId);
+    localStorage.setItem('supermanager_deleted_leagues', JSON.stringify(deletedLeagues));
+  } catch (e) {
+    /* ignore */
   }
 
+  // 2. Clean localStorage
   try {
     const localLeagues = JSON.parse(localStorage.getItem('supermanager_db_leagues') || '{}');
-    delete localLeagues[code.toUpperCase()];
+    delete localLeagues[normCode];
+    delete localLeagues[normId];
     localStorage.setItem('supermanager_db_leagues', JSON.stringify(localLeagues));
   } catch (e) {
     /* ignore */
+  }
+
+  // 3. Delete from Firestore with timeout protection
+  try {
+    const docRef = doc(db, 'leagues', leagueId);
+    const delPromise = deleteDoc(docRef).catch(() => {});
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
+    await Promise.race([delPromise, timeoutPromise]);
+  } catch (err) {
+    console.warn('Firestore delete league notice:', err);
   }
 
   return true;
@@ -1056,49 +1164,7 @@ export async function loadFirestoreGlobalPlayers(): Promise<Record<string, Parti
 
 // Global delete player with persistent tombstones in Firestore & LocalStorage
 export async function deleteGlobalPlayer(playerId: string): Promise<boolean> {
-  // 1. Delete from all_players
-  try {
-    const docRef = doc(db, 'all_players', playerId);
-    await deleteDoc(docRef);
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `all_players/${playerId}`);
-  }
-
-  // 2. Delete from custom_players
-  try {
-    const docRef2 = doc(db, 'custom_players', playerId);
-    await deleteDoc(docRef2);
-  } catch (err) {
-    /* ignore */
-  }
-
-  // 3. Add to Firestore deleted_players collection for global broadcast
-  try {
-    const tombstoneRef = doc(db, 'deleted_players', playerId);
-    await setDoc(tombstoneRef, {
-      id: playerId,
-      deletedAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    /* ignore */
-  }
-
-  // 4. Update app_settings/deleted_players for aggregate lookup
-  try {
-    const settingsRef = doc(db, 'app_settings', 'deleted_players');
-    const snap = await getDoc(settingsRef);
-    const existingIds: string[] = snap.exists() ? (snap.data().ids || []) : [];
-    if (!existingIds.includes(playerId)) {
-      await setDoc(settingsRef, {
-        ids: [...existingIds, playerId],
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-    }
-  } catch (err) {
-    /* ignore */
-  }
-
-  // 5. Update LocalStorage: add to supermanager_deleted_player_ids and remove from custom/overrides
+  // 1. Update LocalStorage immediately: add to supermanager_deleted_player_ids and remove from custom/overrides
   try {
     const deletedList: string[] = JSON.parse(localStorage.getItem('supermanager_deleted_player_ids') || '[]');
     if (!deletedList.includes(playerId)) {
@@ -1115,6 +1181,22 @@ export async function deleteGlobalPlayer(playerId: string): Promise<boolean> {
     localStorage.setItem('supermanager_custom_players', JSON.stringify(nextCustom));
   } catch (e) {
     /* ignore */
+  }
+
+  // 2. Delete from Firestore all_players & custom_players with safety timeout (max 2000ms)
+  try {
+    const del1 = deleteDoc(doc(db, 'all_players', playerId)).catch(() => {});
+    const del2 = deleteDoc(doc(db, 'custom_players', playerId)).catch(() => {});
+    const tombstoneRef = doc(db, 'deleted_players', playerId);
+    const writeTombstone = setDoc(tombstoneRef, {
+      id: playerId,
+      deletedAt: new Date().toISOString(),
+    }).catch(() => {});
+
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
+    await Promise.race([Promise.all([del1, del2, writeTombstone]), timeoutPromise]);
+  } catch (err) {
+    console.warn('Firestore delete player notice:', err);
   }
 
   return true;

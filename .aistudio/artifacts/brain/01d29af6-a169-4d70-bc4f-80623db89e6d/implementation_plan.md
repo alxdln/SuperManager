@@ -1,138 +1,137 @@
-# Plan de Implementare: Sistem Autentificare Modern, Sincronizare Firestore & Aprobare Membri Ligă
+# Indicatori Vizuali Universali de Încărcare la Salvare și Ștergere Bază de Date
 
-Plan complet pentru modernizarea autentificării (Google, Apple, Email/Parolă cu Firebase & Firestore), editarea profilului de manager din Creator OS cu persistență globală, redirecționarea automată în liga activă și fluxul de aprobare a cererilor de aderare de către administrator.
-
----
+Sistem unitar de feedback vizual pentru toate acțiunile de modificare a bazei de date (adăugare, editare, salvare, ștergere) în Creator OS, Panou Admin și Setări: butonul afișează un spinner rotativ animat lângă textul curent, se dezactivează pentru a preveni dubla trimitere, iar fereastra modală/dialogul se închide automat după finalizarea operațiunii.
 
 ## Decizii Confirmate & Preferințe Utilizator
 
 > [!IMPORTANT]
-> Conform răspunsurilor din faza de clarificare:
-> - **Autentificare Google & Apple**: Integrare directă prin Firebase Auth (`signInWithPopup` cu `GoogleAuthProvider` și `OAuthProvider('apple.com')`), cu fallback securizat și salvare automată a profilului în colecția centrală `users/{uid}`.
-> - **Panou Aprobare Admin**: Notificare în joc și panou dedicat de aprobare integrat în secțiunea Ligii (Leaderboard / League Hub), unde administratorul poate accepta sau respinge cererile înainte de generarea lotului de jucători.
+> Conform răspunsurilor oferite în etapa de clarificare:
+> - **Stil indicator**: Spinner rotativ animat (`RefreshCw` / `Loader2` cu clasa `animate-spin`) poziționat direct lângă textul existent al butonului, păstrând eticheta intactă.
+> - **Flux după finalizare**: Închiderea imediată a dialogului/modalului, fără notificări de tip toast suplimentare.
+> - **Protecție dublă-acțiune**: Butoanele sunt dezactivate (`disabled`) pe durata încărcării pentru a preveni trimiteri multiple concurente în baza de date.
 
 ---
 
 ## 1. Prezentare Generală & Obiective
 
-Acest modul rezolvă cele 5 cerințe cheie semnalate:
-1. **Autentificare Google & Apple Funcțională**: Conectare reală prin Firebase Authentication SDK cu sincronizare instantanee a contului în Firestore.
-2. **Logare Securizată cu Email & Parolă**: Repararea formularului de login, validare modernă cu Firestore `users`, persistență sigură a sesiunii și tratare clară a erorilor în limba română.
-3. **Editare Manager din Creator OS**: Repararea salvării contului `alex.manager@superliga.ro` și a oricărui manager; propagare imediată în `users/{id}` și actualizarea stării profilului curent în fundal.
-4. **Auto-Încărcare Ligă Activă la Login**: La autentificare, dacă managerul este deja înscris într-o ligă activă, jocul intră direct în interfața principală. Dacă managerul nu are nicio ligă, se afișează pașii inițiali (creare ligă sau intrare cu cod).
-5. **Sistem de Aprobare Admin pentru Intrarea în Ligă**: Când un utilizator introduce codul unei ligi, se creează o cerere în așteptare (`pending`). Adminul primește notificare și poate apăsa **Acceptă** sau **Respinge**. Doar la aprobarea adminului se alocă lotul de 14 fotbaliști și se debitează bugetul.
+În Creator OS și în modulele de administrare, operațiunile de scriere/ștergere în baza de date (jucători, manageri, ligi, cluburi, cereri de aderare) trebuie să ofere același comportament intuitiv pe care utilizatorul l-a apreciat la editarea managerilor:
+1. La click pe butonul de acțiune, starea `isSubmitting`/`isLoading` devine activă.
+2. Butonul devine semi-opac (`disabled`), iar un spinner rotativ animat apare lângă textul butonului.
+3. Operațiunea asincronă de salvare sau ștergere în Firestore și memoria locală se execută în siguranță.
+4. Fereastra modală/dialog box-ul se închide automat, iar lista sau vizualizarea din spate reflectă imediat modificarea.
 
 ---
 
-## 2. Experiență Utilizator & Fluxuri Vizuale
+## 2. Puncte de Interacțiune Vizate în Aplicație
 
-### Fluxul 1: Conectare (Email, Google, Apple)
-```
-[Ecran Autentificare]
-  ├── Buton "Conectare cu Google" (Popup Firebase Auth -> profil generat în Firestore)
-  ├── Buton "Conectare cu Apple" (Popup Apple OAuth -> profil generat în Firestore)
-  └── Formular Email & Parolă
-        ├── Verificare existență cont în Firestore / Auth
-        ├── Dacă are ligă activă -> Redirecționare directă în joc (Club / Teren)
-        └── Dacă nu are ligă -> Pasul 2: Creare Ligă sau Alăturare cu Cod
+### A. Creator OS – Database Navigator (`DatabaseNavigatorView.tsx`)
+1. **Adăugare Jucător Nou (`handleCreateNewPlayer`)**:
+   - Buton: `Salvează & Publică Global`
+   - Stare adăugată: `isCreatingPlayer`
+   - Efect: spinner rotativ lângă text + închidere modal `isAddPlayerModalOpen`.
+2. **Editare Jucător (`handleConfirmGlobalPublish`)**:
+   - Buton: `Confirmă & Publică Global`
+   - Stare adăugată: `isPublishingPlayer`
+   - Efect: spinner rotativ lângă text + închidere modal `confirmPublishModalOpen` și `editingPlayer`.
+3. **Ștergere Jucător (`handleDeletePlayer`)**:
+   - Buton: `Confirmă Ștergerea`
+   - Stare adăugată: `isDeletingPlayer`
+   - Efect: spinner rotativ lângă text + închidere modal `deletePlayerConfirmId`.
+4. **Editare Manager (`handleSaveManager`)**:
+   - Buton: `Salvează Manager`
+   - Stare existentă: `isSavingManager` (menținută și aliniată la cerința fără toast).
+5. **Ștergere Manager (`handleDeleteManager`)**:
+   - Buton: `Confirmă Ștergerea`
+   - Stare adăugată: `isDeletingManager`
+   - Efect: spinner rotativ lângă text + închidere modal `deleteManagerConfirm`.
+6. **Resetare Parolă Manager (`handleSendPasswordReset`)**:
+   - Buton: `Trimite Link Resetare`
+   - Stare adăugată: `isSendingReset`
+   - Efect: spinner rotativ lângă text + închidere modal `passwordResetManager`.
+7. **Editare Reguli Ligă (`handleSaveLeague`)**:
+   - Buton: `Salvează Modificările Ligii`
+   - Stare adăugată: `isSavingLeague`
+   - Efect: spinner rotativ lângă text + închidere modal `editingLeague`.
+8. **Ștergere Ligă (`handleDeleteLeague`)**:
+   - Buton: `Confirmă Ștergerea Ligii`
+   - Stare adăugată: `isDeletingLeague`
+   - Efect: spinner rotativ lângă text + închidere modal `deleteLeagueConfirm`.
+9. **Adăugare Club Nou (`handleAddClub`)**:
+   - Buton: `Salvează Clubul în Baza de Date`
+   - Stare adăugată: `isAddingClub`
+   - Efect: spinner rotativ lângă text + închidere modal `isAddClubModalOpen`.
+10. **Editare Club Superliga (`handleSaveClub`)**:
+    - Buton: `Salvează Modificările`
+    - Stare adăugată: `isSavingClub`
+    - Efect: spinner rotativ lângă text + închidere modal `editingClub`.
+
+### B. Panou Aprobare Cereri Ligă (`LeaderboardView.tsx`)
+1. **Aprobare Cerere Aderare (`approveLeagueJoinRequest`)**:
+   - Buton: `Acceptă & Acordă Lot`
+   - Stare adăugată: `processingRequestId` (reține id-ul cererii curente).
+   - Efect: spinner rotativ animat pe butonul cererii respective, prevenind click-uri multiple.
+2. **Respingere Cerere Aderare (`rejectLeagueJoinRequest`)**:
+   - Buton: `Respinge`
+   - Stare adăugată: spinner rotativ lângă text pe durata apelului.
+
+### C. Panou Administrator & Setări (`AdminDashboardModal.tsx` & `AuthAndSettingsModal.tsx`)
+1. **Adăugare Jucător în Panoul Admin**:
+   - Buton: `Înregistrează & Listează pe Piață`
+   - Stare: `isSaving` + închidere dialog după finalizare.
+2. **Salvare Setări Ligă**:
+   - Buton: `Salvează Modificările Ligii`
+   - Stare: `isSavingLeague` + închidere dialog după finalizare.
+3. **Actualizare Nume Echipă / Profil Manager**:
+   - Buton: `Salvează Nume Echipă`
+   - Stare: `isUpdatingProfile` + închidere modal.
+
+---
+
+## 3. Arhitectură Tehnică & Șablon Vizual
+
+### Șablon Vizual Buton cu Încărcare
+```tsx
+<button
+  type="submit"
+  disabled={isLoading}
+  className="... flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+>
+  {isLoading && <RefreshCw className="w-4 h-4 animate-spin text-current" />}
+  <span>{buttonText}</span>
+</button>
 ```
 
-### Fluxul 2: Cerere de Aderare la Ligă & Aprobare Admin
 ```
-[Manager Nou]
-  └── Introduce Codul Ligii (ex: "SUPER2026")
-        └── Status: "Cerere Trimisă - În Așteptarea Aprobării de către Administrator"
-              └── (NU primește încă fotbaliști; ecran de așteptare prietenos)
-
-[Administratorul Ligii]
-  ├── Notificare în joc: "🔔 Cerere nouă de aderare: [Nume Manager] ([Nume Echipă])"
-  └── În tab-ul "Clasament / Liga Mea" apare secțiunea:
-        ┌─────────────────────────────────────────────────────────────┐
-        │ 📋 Cereri de Aderare în Așteptare (1)                       │
-        │ • Alex D. (Tricolorii Giulești) · cerut acum 5 min         │
-        │   [✓ Acceptă în Ligă]     [✗ Respinge]                     │
-        └─────────────────────────────────────────────────────────────┘
-  └── La click pe [Acceptă]:
-        ├── Managerul este adăugat oficial în membrii ligii
-        ├── I se generează pachetul de start de 14 jucători unici
-        └── Se trimite notificare de bun venit și articol în știrile ligii
-```
-
-### Fluxul 3: Salvare Date Manager în Creator OS
-```
-[Creator OS -> Navigator Bază de Date -> Tab Manageri]
-  └── Click "Editează" pe alex.manager@superliga.ro
-        ├── Modificare email / nume / echipă / buget / rol
-        ├── Click "Salvează Manager"
-        ├── Scriere directă în Firestore (users/{id}) și actualizare localStorage
-        ├── Dacă managerul editat este cel conectat, actualizează starea `user` din context
-        └── Notificare verde: "Datele managerului au fost salvate cu succes în baza de date!"
+┌─────────────────────────────────────────────────────────┐
+│ Dialog / Modal Acțiune Bază de Date                     │
+├─────────────────────────────────────────────────────────┤
+│ [Inputuri / Mesaj Confirmare]                           │
+│                                                         │
+│ Acțiune Utilizator: Click [Salvează / Confirmă]         │
+│   │                                                     │
+│   ▼                                                     │
+│ [State: isLoading = true, disabled = true]              │
+│   │                                                     │
+│   ▼ (Buton afișează spinner rotativ lângă text)         │
+│ [Așteptare salvare Firestore & localStorage]            │
+│   │                                                     │
+│   ▼                                                     │
+│ [Închidere Automată Fereastră Modală (closeModal)]      │
+│ [Reîmprospătare Listă Date în Fundal]                   │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. Arhitectură Tehnică & Diagramă de Date
+## 4. Etape de Execuție & Verificare
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                            FRONTEND INTERACTION                              │
-│                                                                              │
-│  GameAuthAndOnboardingFlow       AuthAndSettingsModal      Creator OS Modal  │
-│  (Google/Apple/Email login)      (Profil, Setări, Switch)  (Editare Manager) │
-└──────────────────────┬───────────────────────┬───────────────────────┬───────┘
-                       │                       │                       │
-                       ▼                       ▼                       ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                               FANTASY CONTEXT                                │
-│                                                                              │
-│  • login(email, pass) -> interogare Firestore, detectare ligă activă         │
-│  • loginWithProvider(provider) -> Firebase Auth signInWithPopup              │
-│  • requestJoinLeague(code) -> creare cerere pending în Firestore             │
-│  • approveLeagueJoinRequest(reqId) -> activare membru + alocare 14 jucători  │
-│  • rejectLeagueJoinRequest(reqId) -> respingere cerere                       │
-│  • updateManagerGlobalProfile(account) -> sincronizare Firestore + state     │
-└──────────────────────────────────────┬───────────────────────────────────────┘
-                                       │
-                                       ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                           FIRESTORE DATABASE ENGINE                          │
-│                                                                              │
-│  collections:                                                                │
-│  ├── /users/{userId}           (id, email, name, teamName, budget, leagueId) │
-│  ├── /leagues/{leagueId}       (id, name, code, creatorId, members)          │
-│  └── /league_requests/{reqId}  (leagueId, userId, teamName, status: pending) │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 4. Etape de Execuție
-
-1. **Servicii Firebase Auth & Firestore (`src/lib/firebase.ts`)**:
-   - Adăugare `signInWithGooglePopup()` și `signInWithApplePopup()` folosind Firebase Auth SDK.
-   - Adăugare structură `LeagueJoinRequest` și funcții Firestore:
-     - `createFirestoreLeagueJoinRequest(req)`
-     - `getFirestoreLeagueJoinRequests(leagueId)`
-     - `respondFirestoreLeagueJoinRequest(requestId, status, leagueId, userId)`
-   - Rafinare `updateFirestoreUserAccount`: rezolvare migrare cheie email când emailul este schimbat.
-
-2. **Logica în `src/context/FantasyContext.tsx`**:
-   - **`login`**: Căutare profil în Firestore `users`, sincronizare date, setare `isAuthenticated = true`, verificare `leagueId` / `leagueCode`. Returnare `{ success, hasLeague, isCreator, isPendingApproval }`.
-   - **`loginWithProvider`**: Executare popup Google/Apple, creare profil dacă e prima logare, redirecționare corespunzătoare.
-   - **`requestJoinLeague`**: Trimitere cerere cu status `pending` dacă liga are administrator; afișare mesaj clar în loc de alocare directă.
-   - **`approveLeagueJoinRequest` & `rejectLeagueJoinRequest`**: Aprobarea cererii de către admin, generarea lotului de 14 fotbaliști pentru utilizator și adăugarea în clasamentul ligii.
-   - **`updateManagerGlobalProfile`**: Sincronizare directă când se editează din Creator OS sau profil.
-
-3. **Interfețe Vizuale**:
-   - **`GameAuthAndOnboardingFlow.tsx`**:
-     - Tratare completă a erorilor și a stărilor de loading la login/register.
-     - Suport pentru starea de "Cerere în așteptare aprobare admin" cu buton de reîmprospătare stare.
-     - Butoane Google și Apple legate la autentificarea reală.
-   - **`DatabaseNavigatorView.tsx` (Creator OS)**:
-     - Reparare buton "Salvează Manager" astfel încât să apeleze `updateManagerGlobalProfile` și să actualizeze instantaneu starea aplicației fără blocaje.
-   - **`LeaderboardView.tsx` / `ClubDashboardView.tsx`**:
-     - Panou dedicat pentru Administratorul Ligii: lista cererilor de aderare în așteptare cu butoanele "Acceptă" și "Respinge".
-
-4. **Verificare & Validare**:
-   - Rulare `compile_applet` și `lint_applet` pentru a garanta 0 erori TypeScript.
-   - Verificare flux de logare cu `alex.manager@superliga.ro` și `creator@supermanager.ro`.
+1. **Implementare stări în `DatabaseNavigatorView.tsx`**:
+   - Adăugarea variabilelor de stare pentru fiecare dialog (jucători, manageri, ligi, cluburi).
+   - Actualizarea funcțiilor handler asincrone (`try/finally`) pentru resetarea stării și închiderea modalului.
+   - Integrarea spinner-ului rotativ lângă textul butonului pe toate butoanele de submit și confirmare.
+2. **Implementare în `LeaderboardView.tsx`**:
+   - Adăugare `processingRequestId` pentru acțiunile `approveLeagueJoinRequest` și `rejectLeagueJoinRequest`.
+3. **Implementare în `AdminDashboardModal.tsx` & `AuthAndSettingsModal.tsx`**:
+   - Integrare feedback de încărcare și închidere automată după finalizarea salvării.
+4. **Validare & Testare Build**:
+   - Rulare `lint_applet` și `compile_applet` pentru a asigura un cod robust și fără erori de sintaxă sau tipuri.

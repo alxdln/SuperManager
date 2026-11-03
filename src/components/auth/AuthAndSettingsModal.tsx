@@ -17,6 +17,7 @@ import {
   ArrowRight,
   Database,
   FileSpreadsheet,
+  RefreshCw,
 } from 'lucide-react';
 import { GoogleSheetsExportModal } from '../common/GoogleSheetsExportModal';
 
@@ -67,25 +68,43 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  const handleSaveTeamName = (e: React.FormEvent) => {
+  // Action loading states
+  const [isSavingTeamName, setIsSavingTeamName] = useState(false);
+  const [isSavingLeagueSettings, setIsSavingLeagueSettings] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  const handleSaveTeamName = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!teamName.trim()) return;
-    updateUserTeamName(teamName.trim());
-    setStatusMessage('Numele echipei a fost actualizat cu succes!');
-    setTimeout(() => setStatusMessage(null), 3000);
+    setIsSavingTeamName(true);
+    try {
+      await updateUserTeamName(teamName.trim());
+      onClose();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSavingTeamName(false);
+    }
   };
 
-  const handleSaveLeagueSettings = (e: React.FormEvent) => {
+  const handleSaveLeagueSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateLeagueSettings({
-      leagueName: adminLeagueName,
-      startingBudget: adminStartingBudget,
-      maxSquadSize: adminMaxSquadSize,
-      allowMemberAuctions: adminAllowAuctions,
-      transferWindowOpen: adminTransferWindow,
-    });
-    setStatusMessage('Setările ligii au fost salvate cu succes!');
-    setTimeout(() => setStatusMessage(null), 3000);
+    setIsSavingLeagueSettings(true);
+    try {
+      await updateLeagueSettings({
+        leagueName: adminLeagueName,
+        startingBudget: adminStartingBudget,
+        maxSquadSize: adminMaxSquadSize,
+        allowMemberAuctions: adminAllowAuctions,
+        transferWindowOpen: adminTransferWindow,
+      });
+      onClose();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSavingLeagueSettings(false);
+    }
   };
 
   const handleVerifyCreatorPin = (e: React.FormEvent) => {
@@ -101,21 +120,26 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
     }
   };
 
-  const handleChangePassword = (e: React.FormEvent) => {
+  const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPassword || newPassword !== confirmPassword) {
       alert('Parolele noi nu coincid!');
       return;
     }
-    updateUserPassword(newPassword);
-    setOldPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-    setStatusMessage('Parola contului a fost schimbată cu succes!');
-    setTimeout(() => setStatusMessage(null), 3000);
+    setIsChangingPassword(true);
+    try {
+      await updateUserPassword(newPassword);
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      onClose();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsChangingPassword(false);
+    }
   };
 
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginEmail.trim() || !loginPass.trim()) return;
@@ -128,7 +152,7 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
         setTimeout(() => {
           setStatusMessage(null);
           onClose();
-        }, 1200);
+        }, 800);
       } else {
         setStatusMessage(res.message || 'Date de conectare incorecte.');
       }
@@ -287,9 +311,11 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
 
             <button
               type="submit"
-              className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-all shadow-md"
+              disabled={isSavingTeamName}
+              className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Salvează Numele Echipei
+              {isSavingTeamName && <RefreshCw className="w-4 h-4 animate-spin text-current" />}
+              <span>Salvează Numele Echipei</span>
             </button>
 
             <div className="pt-2 border-t border-slate-800">
@@ -400,9 +426,11 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
 
             <button
               type="submit"
-              className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-all shadow-md mt-2"
+              disabled={isSavingLeagueSettings}
+              className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-all shadow-md mt-2 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Salvează Setările Ligii
+              {isSavingLeagueSettings && <RefreshCw className="w-4 h-4 animate-spin text-current" />}
+              <span>Salvează Setările Ligii</span>
             </button>
           </form>
         )}
@@ -493,9 +521,11 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
 
             <button
               type="submit"
-              className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-all shadow-md mt-2"
+              disabled={isChangingPassword}
+              className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-all shadow-md mt-2 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Actualizează Parola
+              {isChangingPassword && <RefreshCw className="w-4 h-4 animate-spin text-current" />}
+              <span>Actualizează Parola</span>
             </button>
           </form>
         )}
@@ -582,9 +612,10 @@ export const AuthAndSettingsModal: React.FC<AuthAndSettingsModalProps> = ({
               <button
                 type="submit"
                 disabled={isLoggingIn}
-                className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-all shadow-md disabled:opacity-50"
+                className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                {isLoggingIn ? 'Se procesează...' : 'Intră în Cont'}
+                {isLoggingIn && <RefreshCw className="w-4 h-4 animate-spin text-current" />}
+                <span>Intră în Cont</span>
               </button>
             </form>
 

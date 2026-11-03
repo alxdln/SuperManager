@@ -1,6 +1,6 @@
 {
-  "summary": "Plan de implementare pentru sistemul modern de autentificare (Firebase Auth real Google/Apple + Email/Parolă securizat cu Firestore), editarea profilului de manager din Creator OS cu sincronizare în fundal, încărcarea automată a ligii active la logare și sistem de cereri de aderare la ligă cu aprobarea administratorului înainte de alocarea lotului de start.",
-  "updatedAt": "2026-11-02T14:06:39.485924448Z",
+  "summary": "Plan de implementare pentru indicatori vizuali universali de încărcare (spinner rotativ lângă textul butonului + închidere automată a dialogurilor) pentru toate operațiunile de adăugare, editare, salvare și ștergere de date din baza de date.",
+  "updatedAt": "2026-11-03T16:15:23.892654361Z",
   "requestFeedback": true,
   "userFacing": true
 }

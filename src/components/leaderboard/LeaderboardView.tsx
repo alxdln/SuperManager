@@ -4,7 +4,7 @@ import { LeagueMember } from '../../types/football';
 import { formatCurrency } from '../../utils/scoringEngine';
 import { ManagerSquadModal } from './ManagerSquadModal';
 import { ManagerSeasonStatsModal } from './ManagerSeasonStatsModal';
-import { Trophy, Medal, Flame, Copy, Check, ChevronRight, X, Clock, UserPlus } from 'lucide-react';
+import { Trophy, Medal, Flame, Copy, Check, ChevronRight, X, Clock, UserPlus, RefreshCw } from 'lucide-react';
 
 export const LeaderboardView: React.FC = () => {
   const {
@@ -19,6 +19,25 @@ export const LeaderboardView: React.FC = () => {
   const [copiedCode, setCopiedCode] = useState(false);
   const [selectedMemberForSquad, setSelectedMemberForSquad] = useState<LeagueMember | null>(null);
   const [selectedMemberForSeasonStats, setSelectedMemberForSeasonStats] = useState<LeagueMember | null>(null);
+  const [processingAction, setProcessingAction] = useState<{ id: string; type: 'approve' | 'reject' } | null>(null);
+
+  const handleApprove = async (reqId: string) => {
+    setProcessingAction({ id: reqId, type: 'approve' });
+    try {
+      await approveLeagueJoinRequest(reqId);
+    } finally {
+      setProcessingAction(null);
+    }
+  };
+
+  const handleReject = async (reqId: string) => {
+    setProcessingAction({ id: reqId, type: 'reject' });
+    try {
+      await rejectLeagueJoinRequest(reqId);
+    } finally {
+      setProcessingAction(null);
+    }
+  };
 
   const isLeagueAdmin =
     user.membership === 'creator' ||
@@ -99,17 +118,27 @@ export const LeaderboardView: React.FC = () => {
 
                 <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
                   <button
-                    onClick={() => approveLeagueJoinRequest(req.id)}
-                    className="flex-1 sm:flex-none py-1.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1 shadow-sm transition-all active:scale-95"
+                    onClick={() => handleApprove(req.id)}
+                    disabled={processingAction?.id === req.id}
+                    className="flex-1 sm:flex-none py-1.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    {processingAction?.id === req.id && processingAction.type === 'approve' ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-current" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    )}
                     <span>Acceptă &amp; Acordă Lot</span>
                   </button>
                   <button
-                    onClick={() => rejectLeagueJoinRequest(req.id)}
-                    className="flex-1 sm:flex-none py-1.5 px-3 rounded-xl bg-slate-800 hover:bg-rose-950 hover:text-rose-400 text-slate-400 font-bold text-xs flex items-center justify-center gap-1 border border-slate-700 transition-all"
+                    onClick={() => handleReject(req.id)}
+                    disabled={processingAction?.id === req.id}
+                    className="flex-1 sm:flex-none py-1.5 px-3 rounded-xl bg-slate-800 hover:bg-rose-950 hover:text-rose-400 text-slate-400 font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    {processingAction?.id === req.id && processingAction.type === 'reject' ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-current" />
+                    ) : (
+                      <X className="w-3.5 h-3.5" />
+                    )}
                     <span>Respinge</span>
                   </button>
                 </div>

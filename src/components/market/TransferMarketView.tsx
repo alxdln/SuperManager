@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Plus,
   Users,
+  RefreshCw,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -64,6 +65,7 @@ export const TransferMarketView: React.FC = () => {
   const [showCreateListingModal, setShowCreateListingModal] = useState(false);
   const [sellingPlayerId, setSellingPlayerId] = useState<string>('');
   const [minAskingPrice, setMinAskingPrice] = useState<number>(1000000);
+  const [isSubmittingListing, setIsSubmittingListing] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // Overdraft Warning Confirmation Modal State
@@ -205,7 +207,7 @@ export const TransferMarketView: React.FC = () => {
     }
   };
 
-  const handleLaunchMemberListing = (e: React.FormEvent) => {
+  const handleLaunchMemberListing = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!sellingPlayerId) {
       setActionMessage({ text: 'Alege un jucător din lot!', type: 'error' });
@@ -230,14 +232,19 @@ export const TransferMarketView: React.FC = () => {
     }
 
     // No listing duration: stays permanently until manager cancels
-    const res = createMemberListing(sellingPlayerId, minAskingPrice);
-    if (res.success) {
-      setShowCreateListingModal(false);
-      setActionMessage({ text: res.message, type: 'success' });
-      confetti({ particleCount: 40, spread: 60 });
-      setActiveMainTab('sell');
-    } else {
-      setActionMessage({ text: res.message, type: 'error' });
+    setIsSubmittingListing(true);
+    try {
+      const res = await createMemberListing(sellingPlayerId, minAskingPrice);
+      if (res.success) {
+        setShowCreateListingModal(false);
+        setActionMessage({ text: res.message, type: 'success' });
+        confetti({ particleCount: 40, spread: 60 });
+        setActiveMainTab('sell');
+      } else {
+        setActionMessage({ text: res.message, type: 'error' });
+      }
+    } finally {
+      setIsSubmittingListing(false);
     }
   };
 
@@ -1120,9 +1127,11 @@ export const TransferMarketView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-600/30 transition-all active:scale-95"
+                  disabled={isSubmittingListing}
+                  className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-600/30 transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Publică pe Piață
+                  {isSubmittingListing && <RefreshCw className="w-4 h-4 animate-spin text-current" />}
+                  <span>Publică pe Piață</span>
                 </button>
               </div>
             </form>

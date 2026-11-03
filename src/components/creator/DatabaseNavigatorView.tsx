@@ -236,6 +236,16 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
     });
   }, [leagues, leagueSearch]);
 
+  // Loading states for actions
+  const [isPublishingPlayer, setIsPublishingPlayer] = useState(false);
+  const [isDeletingPlayer, setIsDeletingPlayer] = useState(false);
+  const [isCreatingPlayer, setIsCreatingPlayer] = useState(false);
+  const [isSavingManager, setIsSavingManager] = useState(false);
+  const [isDeletingManager, setIsDeletingManager] = useState(false);
+  const [isSendingReset, setIsSendingReset] = useState(false);
+  const [isSavingLeague, setIsSavingLeague] = useState(false);
+  const [isDeletingLeague, setIsDeletingLeague] = useState(false);
+
   // Handlers for Player Global Publish
   const handleInitiatePublish = (e: React.FormEvent) => {
     e.preventDefault();
@@ -245,89 +255,100 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
 
   const handleConfirmGlobalPublish = async () => {
     if (!editingPlayer) return;
+    setIsPublishingPlayer(true);
     try {
       await updateGlobalPlayerData(editingPlayer);
       confetti({ particleCount: 50, spread: 70, origin: { y: 0.7 } });
-      showToast(`Modificările pentru ${editingPlayer.name} au fost salvate și publicate global!`);
       setConfirmPublishModalOpen(false);
       setEditingPlayer(null);
     } catch (e) {
-      showToast('Eroare la publicarea datelor. Te rugăm să reîncerci.', 'error');
+      console.error(e);
+    } finally {
+      setIsPublishingPlayer(false);
     }
   };
 
   const handleDeletePlayer = async (id: string) => {
-    await deletePlayerGlobal(id);
-    showToast('Fotbalistul a fost șters definitiv din baza de date.', 'info');
-    setDeletePlayerConfirmId(null);
+    setIsDeletingPlayer(true);
+    try {
+      await deletePlayerGlobal(id);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setDeletePlayerConfirmId(null);
+      setIsDeletingPlayer(false);
+    }
   };
 
   const handleCreateNewPlayer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPlayerForm.name.trim()) {
-      showToast('Introdu numele complet al fotbalistului.', 'error');
       return;
     }
+    setIsCreatingPlayer(true);
+    try {
+      const defaultAvatar = newPlayerForm.avatar.trim()
+        ? newPlayerForm.avatar.trim()
+        : `https://ui-avatars.com/api/?name=${encodeURIComponent(newPlayerForm.name.trim())}&background=0f172a&color=05df72&bold=true`;
 
-    const defaultAvatar = newPlayerForm.avatar.trim()
-      ? newPlayerForm.avatar.trim()
-      : `https://ui-avatars.com/api/?name=${encodeURIComponent(newPlayerForm.name.trim())}&background=0f172a&color=05df72&bold=true`;
+      const parts = newPlayerForm.name.trim().split(' ');
+      const firstName = parts[0] || 'Jucător';
+      const lastName = parts.slice(1).join(' ') || firstName;
 
-    const parts = newPlayerForm.name.trim().split(' ');
-    const firstName = parts[0] || 'Jucător';
-    const lastName = parts.slice(1).join(' ') || firstName;
+      const playerPayload = {
+        name: newPlayerForm.name.trim(),
+        firstName,
+        lastName,
+        clubId: newPlayerForm.clubId,
+        position: newPlayerForm.position,
+        nationality: newPlayerForm.nationality.trim() || 'România',
+        avatar: defaultAvatar,
+        marketValue: Number(newPlayerForm.marketValue) || 1000000,
+        number: 10,
+        age: 24,
+        status: 'active' as const,
+        stats: {
+          matches: 0,
+          goals: 0,
+          assists: 0,
+          shotsOnTarget: 0,
+          shotsMissed: 0,
+          passesCompleted: 0,
+          keyPasses: 0,
+          crossesCompleted: 0,
+          tacklesWon: 0,
+          recoveries: 0,
+          dribblesCompleted: 0,
+          ballsLost: 0,
+          foulsCommitted: 0,
+          foulsDrawn: 0,
+          yellowCards: 0,
+          redCards: 0,
+          cleanSheets: 0,
+          penaltySaves: 0,
+          goalsConceded: 0,
+        },
+      };
 
-    const playerPayload = {
-      name: newPlayerForm.name.trim(),
-      firstName,
-      lastName,
-      clubId: newPlayerForm.clubId,
-      position: newPlayerForm.position,
-      nationality: newPlayerForm.nationality.trim() || 'România',
-      avatar: defaultAvatar,
-      marketValue: Number(newPlayerForm.marketValue) || 1000000,
-      number: 10,
-      age: 24,
-      status: 'active' as const,
-      stats: {
-        matches: 0,
-        goals: 0,
-        assists: 0,
-        shotsOnTarget: 0,
-        shotsMissed: 0,
-        passesCompleted: 0,
-        keyPasses: 0,
-        crossesCompleted: 0,
-        tacklesWon: 0,
-        recoveries: 0,
-        dribblesCompleted: 0,
-        ballsLost: 0,
-        foulsCommitted: 0,
-        foulsDrawn: 0,
-        yellowCards: 0,
-        redCards: 0,
-        cleanSheets: 0,
-        penaltySaves: 0,
-        goalsConceded: 0,
-      },
-    };
-
-    addNewPlayer(playerPayload);
-    confetti({ particleCount: 50, spread: 70, origin: { y: 0.7 } });
-    showToast(`Jucătorul "${newPlayerForm.name}" a fost salvat și publicat global în Firestore!`, 'success');
-    setIsAddPlayerModalOpen(false);
-    setNewPlayerForm({
-      name: '',
-      clubId: 'fcsb',
-      position: 'MID',
-      nationality: 'România',
-      avatar: '',
-      marketValue: 1500000,
-    });
+      await addNewPlayer(playerPayload);
+      confetti({ particleCount: 50, spread: 70, origin: { y: 0.7 } });
+      setIsAddPlayerModalOpen(false);
+      setNewPlayerForm({
+        name: '',
+        clubId: 'fcsb',
+        position: 'MID',
+        nationality: 'România',
+        avatar: '',
+        marketValue: 1500000,
+      });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsCreatingPlayer(false);
+    }
   };
 
   // Handlers for Manager
-  const [isSavingManager, setIsSavingManager] = useState(false);
   const handleSaveManager = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingManager) return;
@@ -351,13 +372,11 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
 
       // Persist globally (Firestore + Context + localStorage)
       await updateManagerProfileGlobal(targetManager, originalEditingEmail || undefined);
-      showToast(`Datele managerului ${targetManager.name} (${targetManager.email}) au fost salvate cu succes!`, 'success');
       setEditingManager(null);
       setOriginalEditingEmail(null);
       await reloadManagers();
     } catch (err) {
       console.error('handleSaveManager error:', err);
-      showToast('Datele au fost salvate local.', 'info');
       setEditingManager(null);
       setOriginalEditingEmail(null);
     } finally {
@@ -367,17 +386,38 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
 
   const handleDeleteManager = async () => {
     if (!deleteManagerConfirm) return;
-    await deleteFirestoreUserAccount(deleteManagerConfirm.id, deleteManagerConfirm.email);
-    showToast(`Contul managerului ${deleteManagerConfirm.name} a fost șters definitiv.`, 'info');
-    setDeleteManagerConfirm(null);
-    reloadManagers();
+    const target = deleteManagerConfirm;
+    setIsDeletingManager(true);
+    // Optimistic removal: instantly removes the manager from UI table
+    setManagers((prev) =>
+      prev.filter(
+        (m) =>
+          m.id !== target.id &&
+          m.email.toLowerCase() !== target.email.toLowerCase()
+      )
+    );
+    try {
+      await deleteFirestoreUserAccount(target.id, target.email);
+    } catch (e) {
+      console.error('Error deleting manager:', e);
+    } finally {
+      setDeleteManagerConfirm(null);
+      setIsDeletingManager(false);
+      reloadManagers();
+    }
   };
 
   const handleSendPasswordReset = async () => {
     if (!passwordResetManager) return;
-    const res = await sendPasswordResetLink(passwordResetManager.email);
-    showToast(res.message, res.success ? 'success' : 'error');
-    setPasswordResetManager(null);
+    setIsSendingReset(true);
+    try {
+      await sendPasswordResetLink(passwordResetManager.email);
+      setPasswordResetManager(null);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSendingReset(false);
+    }
   };
 
   // Handlers for Clubs
@@ -429,18 +469,33 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
   const handleSaveLeague = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingLeague) return;
-    await updateFirestoreLeague(editingLeague);
-    showToast(`Liga "${editingLeague.name}" a fost actualizată!`);
-    setEditingLeague(null);
-    reloadLeagues();
+    setIsSavingLeague(true);
+    try {
+      await updateFirestoreLeague(editingLeague);
+      setEditingLeague(null);
+      await reloadLeagues();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSavingLeague(false);
+    }
   };
 
   const handleDeleteLeague = async () => {
     if (!deleteLeagueConfirm) return;
-    await deleteFirestoreLeague(deleteLeagueConfirm.id, deleteLeagueConfirm.code);
-    showToast(`Liga "${deleteLeagueConfirm.name}" a fost ștearsă definitiv.`, 'info');
-    setDeleteLeagueConfirm(null);
-    reloadLeagues();
+    const target = deleteLeagueConfirm;
+    setIsDeletingLeague(true);
+    // Optimistic removal: instantly removes the league from the UI list
+    setLeagues((prev) => prev.filter((l) => l.id !== target.id && l.code !== target.code));
+    try {
+      await deleteFirestoreLeague(target.id, target.code);
+    } catch (e) {
+      console.error('Error deleting league:', e);
+    } finally {
+      setDeleteLeagueConfirm(null);
+      setIsDeletingLeague(false);
+      reloadLeagues();
+    }
   };
 
   const getClubById = (id: string): Club | undefined => {
@@ -1340,9 +1395,10 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
               </button>
               <button
                 onClick={handleConfirmGlobalPublish}
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black shadow-lg shadow-indigo-600/30 transition-all flex items-center gap-2"
+                disabled={isPublishingPlayer}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Check className="w-4 h-4" />
+                {isPublishingPlayer ? <RefreshCw className="w-4 h-4 animate-spin text-current" /> : <Check className="w-4 h-4" />}
                 <span>Confirmă &amp; Publică Global</span>
               </button>
             </div>
@@ -1376,9 +1432,11 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
               </button>
               <button
                 onClick={() => handleDeletePlayer(deletePlayerConfirmId)}
-                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black shadow-lg shadow-rose-600/30 transition-all"
+                disabled={isDeletingPlayer}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black shadow-lg shadow-rose-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Confirmă Ștergerea
+                {isDeletingPlayer && <RefreshCw className="w-4 h-4 animate-spin text-current" />}
+                <span>Confirmă Ștergerea</span>
               </button>
             </div>
           </div>
@@ -1535,9 +1593,10 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black shadow-lg shadow-indigo-600/30 transition-all flex items-center gap-2"
+                  disabled={isCreatingPlayer}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Check className="w-4 h-4" />
+                  {isCreatingPlayer ? <RefreshCw className="w-4 h-4 animate-spin text-current" /> : <Check className="w-4 h-4" />}
                   <span>Salvează &amp; Publică Global</span>
                 </button>
               </div>
@@ -1662,16 +1721,10 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
                 <button
                   type="submit"
                   disabled={isSavingManager}
-                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition-all shadow-md flex items-center gap-2 disabled:opacity-50"
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isSavingManager ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Se salvează...</span>
-                    </>
-                  ) : (
-                    <span>Salvează Manager</span>
-                  )}
+                  {isSavingManager && <RefreshCw className="w-4 h-4 animate-spin text-current" />}
+                  <span>Salvează Manager</span>
                 </button>
               </div>
             </form>
@@ -1712,9 +1765,10 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
               </button>
               <button
                 onClick={handleSendPasswordReset}
-                className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black shadow-lg shadow-amber-500/30 transition-all flex items-center gap-1.5"
+                disabled={isSendingReset}
+                className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black shadow-lg shadow-amber-500/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Mail className="w-4 h-4" />
+                {isSendingReset ? <RefreshCw className="w-4 h-4 animate-spin text-current" /> : <Mail className="w-4 h-4" />}
                 <span>Trimite Link Resetare</span>
               </button>
             </div>
@@ -1748,9 +1802,11 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
               </button>
               <button
                 onClick={handleDeleteManager}
-                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black shadow-lg shadow-rose-600/30 transition-all"
+                disabled={isDeletingManager}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black shadow-lg shadow-rose-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Confirmă Ștergerea
+                {isDeletingManager && <RefreshCw className="w-4 h-4 animate-spin text-current" />}
+                <span>Confirmă Ștergerea</span>
               </button>
             </div>
           </div>
@@ -1833,9 +1889,11 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold"
+                  disabled={isSavingLeague}
+                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Salvează Modificările
+                  {isSavingLeague && <RefreshCw className="w-4 h-4 animate-spin text-current" />}
+                  <span>Salvează Modificările</span>
                 </button>
               </div>
             </form>
@@ -1869,9 +1927,11 @@ export const DatabaseNavigatorView: React.FC<DatabaseNavigatorViewProps> = () =>
               </button>
               <button
                 onClick={handleDeleteLeague}
-                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black shadow-lg shadow-rose-600/30 transition-all"
+                disabled={isDeletingLeague}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black shadow-lg shadow-rose-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Confirmă Ștergerea
+                {isDeletingLeague && <RefreshCw className="w-4 h-4 animate-spin text-current" />}
+                <span>Confirmă Ștergerea</span>
               </button>
             </div>
           </div>
